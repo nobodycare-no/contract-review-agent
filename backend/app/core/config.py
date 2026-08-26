@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     llm_model: str = "qwen3-8b"
     llm_timeout_s: int = 120
 
+    # mock 审批系统（服务间）
+    mock_base_url: str = "http://mock-approval:8100"
+
     # OCR
     tesseract_cmd: str = ""          # 空则用系统 PATH 中的 tesseract
     ocr_lang: str = "chi_sim"
