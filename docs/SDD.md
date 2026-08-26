@@ -88,6 +88,16 @@ sequenceDiagram
 absence 语义：match_text 逗号分隔关键词组，**全部**未出现即命中（缺失即风险）。
 汇总规则：overall = max(命中级别)；无命中 → low；关注点 = 各命中 suggestion_text。
 
+## 4.1 API 清单（全集）
+
+| 面 | 路由 | 说明 |
+|----|------|------|
+| 工具面 | POST /tools/list_pending · /tools/get_approval · /tools/download_attachment · /tools/parse_document · /tools/run_rules · /tools/save_result · /tools/write_comment | 七工具（Agent 与 CLI 共用） |
+| Agent 面 | POST /agent/run · GET /agent/tasks · GET /agent/tasks/{id} · POST /agent/tasks/{id}/retry · GET /agent/tasks/{id}/logs | 触发闭环/查询/重试/日志 |
+| Mock 面(内网) | GET /mock/approvals · GET /mock/approvals/{iid} · GET /mock/approvals/{iid}/attachments/{aid} · POST /mock/approvals/{iid}/comments · POST /mock/reset | 外部审批系统仿真 |
+| 管理面 | GET/PUT /admin/rules · GET /admin/logs/{task_id} · POST /admin/reset-demo（X-Admin-Token） | 系统管理员 |
+| 健康 | GET /health | 存活探针 |
+
 ## 5. 错误处理矩阵（blocked 触发面）
 
 | 环节 | 异常 | 行为 |
