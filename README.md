@@ -38,4 +38,12 @@ docker compose exec app python -m app.tools.demo   # 彩色输出五阶段全过
 
 ## 文档
 
-[docs/需求覆盖验证报告.md](docs/需求覆盖验证报告.md) · [docs/开发手册.md](docs/开发手册.md)
+| 文档 | 路径 |
+|------|------|
+| 需求文档 SRD | [docs/srd/SRD.md](docs/srd/SRD.md) |
+| 架构文档 SAD | [docs/sad/SAD.md](docs/sad/SAD.md) |
+| 详细设计 SDD | [docs/sdd/SDD.md](docs/sdd/SDD.md) |
+| 开发手册（切片计划） | [docs/开发手册.md](docs/开发手册.md) |
+| 部署手册（云端生产） | [docs/部署手册.md](docs/部署手册.md) |
+| 测试评估报告 | [docs/测试评估报告.md](docs/测试评估报告.md) |
+| 需求覆盖验证报告 | [docs/需求覆盖验证报告.md](docs/需求覆盖验证报告.md) |

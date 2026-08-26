@@ -2,9 +2,11 @@
 
 | 项 | 内容 |
 |----|------|
-| 版本 | v1.0 |
+| 版本 | v1.1（对齐复核修订） |
 | 需求基线 | 《大模型项目实战》§2.4 合同审批审查系统 |
 | 关联仓库 | github.com/nobodycare-no/contract-review-agent |
+
+> v1.1 变更：修复 FR-D 表格错乱；N05 扩展为含云端部署要求；FR-D6 表述与 SDD 错误矩阵对齐。
 
 ## 1. 项目概述
 
@@ -52,14 +54,12 @@
 ### FR-D 输出与回写
 | 编号 | 需求 | 优先级 |
 |------|------|--------|
-| D5 | 回写日志落库 comment_logs | P0 |
-| D6 | blocked 触发面：附件缺失 / 图片无法识别 / 文档内容为空 / 接口调用失败 四类统一进入 blocked 并记录原因；retry 按 block_stage 回溯 parsing 或 reviewing | P0 |
-|------|------|--------|
 | D1 | 结果保存：总风险等级+摘要+关注点 JSON+评论全文 | P0 |
 | D2 | 评论生成：结构化模板 + LLM 摘要润色（降级时纯模板） | P0 |
 | D3 | 跨服务 HTTP 回写至 mock 审批评论区 | P0 |
 | D4 | 回写状态机 not_written→writing→success/failed | P0 |
 | D5 | 回写日志落库 comment_logs | P0 |
+| D6 | blocked 触发面：附件缺失 / 图片无法识别 / 文档内容为空 / 接口调用失败，四类统一进入 blocked 并记录原因；retry 按 block_stage 回溯 parsing 或 reviewing | P0 |
 
 ### FR-E Agent 循环
 | 编号 | 需求 | 优先级 |
@@ -86,8 +86,9 @@
 | N02 | 可靠性 | LLM 不可用时降级为纯规则引擎模板意见，闭环不中断 |
 | N03 | 安全 | 管理面 Admin Token；附件路径穿越防护；mock 与工具面端口隔离 |
 | N04 | 可观测 | 八表日志体系 + task_logs 六类分级 |
-| N05 | 可部署 | 双容器 compose 一键起；MySQL 数据卷持久化 |
+| N05 | 可部署 | 双容器 compose 一键起；MySQL 数据卷持久化；**云端部署**：独立新购云服务器，prod override（restart 策略/收敛端口/持久卷），部署手册 docs/部署手册.md |
 | N06 | 测试 | pytest 覆盖去重/规则矩阵/状态机/mock 全链路（LLM mock） |
+| N07 | 环境隔离 | 与项目 A 完全独立：独立仓库/独立 compose 项目名/独立网络与数据卷；GPU 推理复用 AutoDL 但仅按需开机 |
 
 ## 5. 验收标准（规范 §2.4.12 七条逐条映射）
 

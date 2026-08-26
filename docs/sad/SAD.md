@@ -2,8 +2,10 @@
 
 | 项 | 内容 |
 |----|------|
-| 版本 | v1.0 |
-| 上游 | docs/SRD.md |
+| 版本 | v1.1（对齐复核修订） |
+| 上游 | docs/srd/SRD.md |
+
+> v1.1 变更：新增 ADR-B7 混合 Function-Calling 路径；§4 部署视图扩展云端部署形态；勘误 mock 合同画像数量（5→6）。
 
 ## 1. 总体架构（双服务）
 
@@ -22,7 +24,7 @@ graph TB
 
     subgraph MOCKSVC ["mock-approval 容器 :8100 (模拟外部审批系统)"]
         MK["FastAPI<br/>待办/详情/附件docx流/评论接收"]
-        DATA[("内存注册表<br/>5份合同画像")]
+        DATA[("内存注册表<br/>6份合同画像")]
     end
 
     APP -->|"MySQL 8表"| DB[("MySQL 8")]
@@ -52,6 +54,9 @@ vLLM 不可用时：跳过 LLM 字段增强与摘要润色，使用正则提取�
 ### ADR-B6 认证模型
 工具面与 Agent 面为内网自动化调用，不设用户 JWT；管理面（规则编辑/日志/重试）用 `X-Admin-Token` 常量时间比较保护。Web 工作台只读，无鉴权（演示定位），生产需接入 SSO。
 
+### ADR-B7 混合 Function-Calling 路径（v1.1 新增）
+Agent 与 LLM 的工具调度采用**双通道**：①优先 vLLM 原生 tools API（OpenAI 兼容 `tools` 参数 + `tool_calls` 返回，需服务端 `--enable-auto-tool-choice --tool-call-parser hermes`）；②启动时对端点做一次能力探测（发送最小 tools 请求），若返回不含结构化 tool_calls 或报错，自动降级为**提示词 JSON 协议**——模型按约定输出 `{"tool": "...", "args": {...}}` 单行 JSON，由 app 侧解析并执行同一套工具执行器。两通道共享工具注册表与步数上限；降级事件写入 task_logs。理由：原生路径含金量高、贴合规范字面；JSON 协议保证任意 vLLM 配置/任何 OpenAI 兼容端点都可用——GPU 演示不因服务端参数被卡死。
+
 ## 3. 存储职责隔离
 
 | 介质 | 职责 | 禁止 |
@@ -62,4 +67,11 @@ vLLM 不可用时：跳过 LLM 字段增强与摘要润色，使用正则提取�
 
 ## 4. 部署视图
 
-双容器 + 共享网络 cranet；MySQL 数据卷持久化；app:18000 为唯一宿主入口（web 简易页同源挂载）。
+### 4.1 本地开发（Windows/Docker Desktop）
+三容器（mysql / mock-approval / app）+ 专属网络 cranet + 数据卷 mysql_data；compose 项目名显式声明 `contract-review-agent`，与项目 A 的 kbnet 体系完全隔离。宿主端口：app `18000:8000`（唯一入口，web 简易页 StaticFiles 同源挂载）、mock 回环调试口 `127.0.0.1:18100:8100`（生产移除）。
+
+### 4.2 云端生产（新购独立云服务器）
+- 形态：同一 compose + `docker-compose.prod.yml` override——全部服务 `restart: unless-stopped`；mock 的回环端口映射移除；app 映射 `18000:8000` 供外网访问；MySQL 不暴露宿主端口；attachments 使用命名卷持久化。
+- 边界：安全组仅放行 SSH(22) 与 18000；MySQL/mock 仅内网。
+- LLM：AutoDL 实例公网映射 URL 填入 `LLM_BASE_URL`；GPU 关机时系统按 ADR-B5/B7 自动降级纯规则模板模式，云端服务不中断。
+- 操作规程见 docs/部署手册.md（服务器初始化→安装 Docker→配置→启动→探针验收→备份）。

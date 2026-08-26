@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+.uvcache/
+
+# 环境与密钥（只提交 .env.example）
+.env
+.env.*
+!.env.example
+
+# 数据与存储
+attachments/
+*.sqlite3
+
+# IDE / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Node（T7 web）
+node_modules/
+web/dist/
