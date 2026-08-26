@@ -15,6 +15,8 @@ cryptography>=42
 # ===== 模型接入（function calling / 结构化提取）=====
 openai>=1.35
 httpx>=0.27
+prometheus-client>=0.20
+PyYAML>=6.0
 
 # ===== 文档解析 =====
 pypdf>=4.2

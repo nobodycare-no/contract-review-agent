@@ -54,14 +54,27 @@ vLLM 不可用时：跳过 LLM 字段增强与摘要润色，使用正则提取�
 ### ADR-B6 认证模型
 工具面与 Agent 面为内网自动化调用，不设用户 JWT；管理面（规则编辑/日志/重试）用 `X-Admin-Token` 常量时间比较保护。Web 工作台只读，无鉴权（演示定位），生产需接入 SSO。
 
-### ADR-B7 混合 Function-Calling 路径（v1.1 新增）
-Agent 与 LLM 的工具调度采用**双通道**：①优先 vLLM 原生 tools API（OpenAI 兼容 `tools` 参数 + `tool_calls` 返回，需服务端 `--enable-auto-tool-choice --tool-call-parser hermes`）；②启动时对端点做一次能力探测（发送最小 tools 请求），若返回不含结构化 tool_calls 或报错，自动降级为**提示词 JSON 协议**——模型按约定输出 `{"tool": "...", "args": {...}}` 单行 JSON，由 app 侧解析并执行同一套工具执行器。两通道共享工具注册表与步数上限；降级事件写入 task_logs。理由：原生路径含金量高、贴合规范字面；JSON 协议保证任意 vLLM 配置/任何 OpenAI 兼容端点都可用——GPU 演示不因服务端参数被卡死。
+### ADR-B7 混合 Function-Calling 路径
+Agent 与 LLM 的工具调度采用**双通道**：①优先 vLLM 原生 tools API（OpenAI 兼容 `tools` 参数 + `tool_calls` 返回，需服务端 `--enable-auto-tool-choice --tool-call-parser hermes`）；②启动时对端点做能力探测（发送最小 tools 请求），若返回不含结构化 tool_calls 或报错，自动降级为**提示词 JSON 协议**——模型按约定输出 `{"tool": "...", "args": {...}}` 单行 JSON，由 app 侧解析并执行同一套工具执行器。两通道共享工具注册表与步数上限；降级事件写入 task_logs。理由：原生路径含金量高、贴合规范字面；JSON 协议保证任意 vLLM 配置/任何 OpenAI 兼容端点都可用——GPU 演示不因服务端参数被卡死。
+
+### ADR-B8 生产级 RunController（v1.2 核心升级）
+Agent 不再是"一个循环函数"，而是具备生产运行时特征的 **RunController**：
+- **事件溯源式持久化**：每步将完整消息快照写入新增 `agent_runs` 表（规范八表之外的第九表，偏差已登记）——进程崩溃/重启后可从任意步**断点恢复**（POST /agent/runs/{id}/resume），同时天然构成审计轨迹；
+- **三维预算**：步数（规范要求 ≤12）/ token 上限 / 墙钟时限，任一触顶不硬失败而是进入**优雅终结**路径（以已采集数据强制 save+write）；
+- **熔断器**：LLM 连续失败 ≥3 次开路 60s，开路期直接走确定性通道——防止故障期每个任务都白等超时；
+- **干跑模式**：`POST /agent/run?dry_run=true` 全链路真实执行但跳过最终评论外呼——对"写外部生产系统"的操作必须提供无害演练通道；
+- **幂等回写守卫**：write_status=success 的任务拒绝重复评论外呼，除非显式 force。
+
+备选取舍：不引入 Celery/Redis 任务队列（演示规模内 FastAPI BackgroundTasks + DB 状态机足够，避免运维面扩大）；不做完整事件溯源框架（单表快照已满足恢复+审计双诉求）。这些取舍使架构在 1.5 天内可落地且每个机制都可现场演示。
+
+### ADR-B9 LLM 轨迹录制回放（VCR 式测试）
+真实 GPU 会话中录制模型的逐轮响应为 fixtures（JSON 轨迹文件），单元/回归测试通过 FakeTransport 回放——**CI 全程无 GPU**，且服务端提示词或解析逻辑变更时能立刻发现轨迹行为漂移。这是 LLM 工程从"demo 靠运气"到"工程可回归"的分界线。
 
 ## 3. 存储职责隔离
 
 | 介质 | 职责 | 禁止 |
 |------|------|------|
-| MySQL | 八表事实源 | 不存文件本体 |
+| MySQL | 八表事实源 + agent_runs 运行记录（第九表，工程超集） | 不存文件本体 |
 | 本地盘 attachments/ | 下载的合同文件暂存 | 解析后非权威 |
 | mock 内存注册表 | 外部审批单仿真状态 | 重启即复位（reset 端点可复现演示） |
 

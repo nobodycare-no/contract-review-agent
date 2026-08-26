@@ -2,11 +2,12 @@
 
 | 项 | 内容 |
 |----|------|
-| 版本 | v1.1（对齐复核修订） |
+| 版本 | v1.2（生产级 Harness 升级） |
 | 需求基线 | 《大模型项目实战》§2.4 合同审批审查系统 |
 | 关联仓库 | github.com/nobodycare-no/contract-review-agent |
 
-> v1.1 变更：修复 FR-D 表格错乱；N05 扩展为含云端部署要求；FR-D6 表述与 SDD 错误矩阵对齐。
+> v1.1 变更：修复 FR-D 表格错乱；N05 扩展为含云端部署要求。
+> v1.2 变更：新增 FR-E5 运行预算、FR-G 生产化运行时需求组；N04 升级为结构化可观测体系。
 
 ## 1. 项目概述
 
@@ -68,6 +69,7 @@
 | E2 | 七工具 JSON Schema 暴露给模型（规范 §2.4.10 签名逐一对应） | P0 |
 | E3 | 步数耗尽或模型未回写时**强制兜底执行回写工具** | P0 |
 | E4 | 全链路日志（fetch/download/parse/rule/write/agent 六类） | P0 |
+| E5 | 运行预算三维化：步数 × token 上限 × 墙钟时限，任一触顶进入优雅终结（强制 save+write），任务终态必为 done 或 blocked | P0 |
 
 ### FR-F 管理与可用性
 | 编号 | 需求 | 优先级 |
@@ -76,7 +78,18 @@
 | F2 | 规则启停/编辑 API（Admin Token 保护） | P1 |
 | F3 | 运行日志查询 API（按 task） | P1 |
 | F4 | mock 数据重置端点（演示复现） | P1 |
-| F5 | 简易 Web 工作台：待审列表/详情/命中/回写状态 | P1 |
+| F5 | 简易 Web 工作台：待审列表/详情/命中/回写状态/运行轨迹 | P1 |
+
+### FR-G 生产化运行时（v1.2 新增，简历核心差异化）
+| 编号 | 需求 | 优先级 |
+|------|------|--------|
+| G1 | 断点恢复：每步持久化消息快照至 agent_runs；进程崩溃后 POST /agent/runs/{id}/resume 从断点继续 | P0 |
+| G2 | dry-run 模式：全链路真实执行但跳过评论外呼，用于安全演练 | P0 |
+| G3 | 熔断器：LLM 连续失败 ≥3 次开路 60s，开路期直接走确定性通道并记录降级事件 | P0 |
+| G4 | 指标面：GET /metrics 以 Prometheus 文本格式暴露 runs/llm_calls/tool_calls/fallback/blocked/latency 计数 | P1 |
+| G5 | 提示词版本注册表：prompts.yaml 版本化，prompt_version/model/channel 写入运行记录，结果可复现 | P1 |
+| G6 | 轨迹录制回放：GPU 会话录制为 fixtures，测试以 FakeTransport 回放——CI 无 GPU | P1 |
+| G7 | 输出护栏与幂等守卫：回写文本长度上限/格式校验/控制符净化；write_status=success 拒绝重复外呼 | P0 |
 
 ## 4. 非功能需求（NFR）
 
@@ -85,7 +98,7 @@
 | N01 | 性能 | 单合同全闭环 ≤60s（GPU 在线，OCR 页除外） |
 | N02 | 可靠性 | LLM 不可用时降级为纯规则引擎模板意见，闭环不中断 |
 | N03 | 安全 | 管理面 Admin Token；附件路径穿越防护；mock 与工具面端口隔离 |
-| N04 | 可观测 | 八表日志体系 + task_logs 六类分级 |
+| N04 | 可观测 | 结构化 JSON 日志（run_id/task_id 全链关联）+ task_logs 六类分级 + GET /metrics(Prometheus) + 组件级 /health(mysql/mock/llm) |
 | N05 | 可部署 | 双容器 compose 一键起；MySQL 数据卷持久化；**云端部署**：独立新购云服务器，prod override（restart 策略/收敛端口/持久卷），部署手册 docs/部署手册.md |
 | N06 | 测试 | pytest 覆盖去重/规则矩阵/状态机/mock 全链路（LLM mock） |
 | N07 | 环境隔离 | 与项目 A 完全独立：独立仓库/独立 compose 项目名/独立网络与数据卷；GPU 推理复用 AutoDL 但仅按需开机 |
