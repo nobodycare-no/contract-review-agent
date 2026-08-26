@@ -11,7 +11,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 COPY app ./app
-COPY contracts ./contracts
 RUN mkdir -p /srv/storage/attachments
 
 EXPOSE 8000
