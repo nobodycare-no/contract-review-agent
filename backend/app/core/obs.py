@@ -105,3 +105,24 @@ class CircuitBreaker:
                 self._opened_at = time.monotonic()
                 self._fails = 0
                 CIRCUIT_STATE.set(2)
+
+
+_breaker: CircuitBreaker | None = None
+
+
+def get_circuit_breaker() -> CircuitBreaker:
+    """进程级单例熔断器（阈值/开路时长来自配置）。"""
+    global _breaker
+    if _breaker is None:
+        from app.core.config import get_settings
+
+        settings = get_settings()
+        _breaker = CircuitBreaker(settings.circuit_fail_threshold,
+                                  settings.circuit_open_seconds)
+    return _breaker
+
+
+def reset_circuit_breaker() -> None:
+    """测试辅助：恢复出厂状态。"""
+    global _breaker
+    _breaker = None

@@ -24,10 +24,12 @@ def create_app() -> FastAPI:
     app.state.llm_probe_cache: dict = {"ts": 0.0, "ok": None}  # type: ignore[attr-defined]
 
     from app.api.agent import router as agent_router
+    from app.api.admin import router as admin_router
     from app.api.tools import router as tools_router
 
     app.include_router(tools_router)
     app.include_router(agent_router)
+    app.include_router(admin_router)
 
     @app.get("/health")
     def health() -> dict:

@@ -87,3 +87,60 @@ def task_logs(task_id: int, db: Session = Depends(get_db)) -> dict:
     return {"logs": [{"level": r.log_level, "type": r.log_type,
                       "content": r.log_content, "created_at": str(r.created_at)}
                      for r in rows]}
+
+
+# ---------- RunController 入口（T6） ----------
+
+def _run_view(run) -> dict:
+    return {"run_id": run.id, "task_id": run.task_id, "channel": run.channel,
+            "status": run.status, "dry_run": bool(run.dry_run),
+            "steps_used": run.steps_used, "llm_calls": run.llm_calls,
+            "tokens": run.prompt_tokens + run.completion_tokens,
+            "wall_ms": run.wall_ms, "fallback_kind": run.fallback_kind,
+            "prompt_version": run.prompt_version, "model": run.model_name,
+            "error_digest": run.error_digest}
+
+
+@router.post("/run")
+def run(req: dict, db: Session = Depends(get_db)) -> dict:
+    from app.services import fetcher
+    from app.services.agent_loop import RunController
+    from app.services.tool_errors import ToolError
+
+    instance_id = req.get("instance_id")
+    task = None
+    if req.get("task_id") is not None:
+        task = db.query(ApprovalTask).filter_by(id=req["task_id"]).one_or_none()
+    elif instance_id:
+        task = db.query(ApprovalTask).filter_by(instance_id=instance_id).one_or_none()
+        if task is None:  # 未入库则先同步一次待办
+            fetcher.sync_pending_approvals(db)
+            task = db.query(ApprovalTask).filter_by(instance_id=instance_id).one_or_none()
+    if task is None:
+        raise HTTPException(404, f"找不到任务: {req}")
+
+    controller = RunController(db, task, dry_run=bool(req.get("dry_run")))
+    try:
+        run = controller.start()
+    except ToolError as exc:
+        raise HTTPException(409, exc.code)
+
+    view = _run_view(run)
+    view["trace"] = controller.ctx.trace
+    return view
+
+
+@router.post("/runs/{run_id}/resume")
+def resume_run(run_id: int, db: Session = Depends(get_db)) -> dict:
+    from app.services.agent_loop import RunController
+    from app.services.tool_errors import ToolError
+
+    run = db.query(AgentRun).filter_by(id=run_id).one_or_none()
+    if run is None:
+        raise HTTPException(404, "run 不存在")
+    task = db.query(ApprovalTask).filter_by(id=run.task_id).one()
+    try:
+        run = RunController(db, task).resume(run_id)
+    except ToolError as exc:
+        raise HTTPException(409, exc.code)
+    return _run_view(run)
