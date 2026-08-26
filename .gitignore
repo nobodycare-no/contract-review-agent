@@ -24,3 +24,4 @@ Thumbs.db
 # Node（T7 web）
 node_modules/
 web/dist/
+.pytest_tmp/

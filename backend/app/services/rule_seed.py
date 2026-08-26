@@ -12,7 +12,8 @@ SEED_RULES: list[dict] = [
     },
     {
         "rule_code": "PAY_CYCLE_LONG", "rule_name": "付款周期过长", "risk_level": "medium",
-        "match_mode": "regex", "match_text": r"(?:验收合格后|交付后|到票后)\s*([0-9]+)\s*(?:个)?工作日(?:内)?支付",
+        "match_mode": "regex",
+        "match_text": r"(?:验收合格后|交付后|到货后|到票后)\s*([0-9]+)\s*(?:个)?工作日(?:内)?支付",
         "suggestion_text": "付款周期超过60个工作日，建议缩短周期并明确起算点。",
     },
     {
@@ -27,7 +28,8 @@ SEED_RULES: list[dict] = [
     },
     {
         "rule_code": "JURISDICTION_RISK", "rule_name": "管辖地不利", "risk_level": "medium",
-        "match_mode": "regex", "match_text": r"管辖[^。]{0,20}(原告|被告|我方|对方|供方)[^。]{0,6}所在地",
+        "match_mode": "regex",
+        "match_text": r"管辖[^。]{0,20}(原告|被告|我方|对方|供方)[^。]{0,6}所在地|(?:向|由)(甲方|乙方)所在地(?:人民法院|法院)",
         "suggestion_text": "争议管辖约定为对方所在地，建议协商改为被告所在地或仲裁。",
     },
     {
@@ -37,7 +39,7 @@ SEED_RULES: list[dict] = [
     },
     {
         "rule_code": "AMOUNT_MISSING", "rule_name": "合同金额缺失", "risk_level": "high",
-        "match_mode": "absence", "match_text": "合同金额,合同总价,总价款",
+        "match_mode": "absence", "match_text": "合同金额,合同总价,总金额,总价款",
         "suggestion_text": "合同未载明金额条款，属于重大要素缺失，必须补齐后再签署。",
     },
     {

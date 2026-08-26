@@ -1,6 +1,7 @@
 """合同文档解析器：docx/md/txt → 全文；pdf → pypdf；png/jpg → tesseract OCR。
 
-输出结构化字段（LLM 提取 + 正则兜底）与八类条款定位。
+结构化输出契约（SDD §8）：所有字段三元组 {value, pos, status}；
+金额归一化为数值元(value)+raw_text；日期归一化 YYYY-MM-DD；缺失也入库(status=missing)。
 """
 from __future__ import annotations
 
@@ -15,6 +16,8 @@ from app.core.config import get_settings
 class ParseError(Exception):
     pass
 
+
+# ---------- 全文提取 ----------
 
 def extract_raw_text(file_path: str) -> tuple[str, str]:
     """按扩展名提取全文，返回 (text, file_type)。"""
@@ -49,7 +52,13 @@ def _extract_docx(data: bytes) -> str:
         document = docx.Document(io.BytesIO(data))
     except Exception as e:
         raise ParseError(f"DOCX 解析失败: {e}") from e
-    parts = [p.text for p in document.paragraphs if p.text.strip()]
+    parts: list[str] = []
+    for para in document.paragraphs:
+        style = getattr(para.style, "name", "") or ""
+        text = para.text.strip()
+        if not text:
+            continue
+        parts.append(f"# {text}" if style.startswith("Heading") or style == "Title" else text)
     for table in document.tables:
         for row in table.rows:
             cells = [c.text.strip() for c in row.cells if c.text.strip()]
@@ -93,45 +102,113 @@ def _extract_ocr(data: bytes) -> str:
     return text
 
 
+# ---------- 归一化工具（SDD §8） ----------
+
+_DATE_RE = re.compile(r"((?:19|20)\d{2})\s*[年.\-/]\s*(\d{1,2})\s*[月.\-/]\s*(\d{1,2})\s*日?")
+
+
+def _norm_date(raw: str) -> str | None:
+    m = _DATE_RE.search(raw)
+    if not m:
+        return None
+    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    try:
+        import datetime as _dt
+
+        _dt.date(y, mo, d)
+    except ValueError:
+        return None
+    return f"{y:04d}-{mo:02d}-{d:02d}"
+
+
+def _norm_amount_yuan(digits: str, wan: bool) -> float:
+    value = float(digits.replace(",", "").replace("，", ""))
+    return value * 10_000 if wan else value
+
+
+_CURRENCY_WORDS = ("人民币", "美元", "欧元", "日元", "港币")
+
+
 # ---------- 结构化提取 ----------
 
-BASIC_PATTERNS = {
+BASIC_PATTERNS: dict[str, list[str]] = {
     "contract_title": [r"合同名称[：:]\s*(.+)"],
-    "contract_no": [r"合同编号[：:]\s*([A-Za-z0-9\-/]+)"],
-    "party_a": [r"甲方[（(]?(?:签约主体|采购方)?[）)?]?[：:]\s*([^\n，,。;；]{4,40})"],
-    "party_b": [r"乙方[（(]?(?:供应商|服务方)?[）)?]?[：:]\s*([^\n，,。;；]{4,40})"],
-    "amount": [r"(?:合同总?金额|总价)[^0-9]{0,6}([0-9,，]+(?:\.[0-9]+)?)\s*万?元"],
-    "currency": [r"(?:币种|货币)[：:]\s*(\S{1,10})"],
-    "effective_date": [r"(?:生效日期|生效时间|自)\s*[:：]?\s*([0-9]{4}年?[0-9]{1,2}月[0-9]{1,2}日)"],
-    "expire_date": [r"(?:到期日期|终止日期|至)\s*[:：]?\s*([0-9]{4}年?[0-9]{1,2}月[0-9]{1,2}日)"],
+    "contract_no": [r"(?:合同编号|协议编号)[：:]\s*([A-Za-z0-9\-/]+)"],
+    "party_a": [
+        r"甲方[（(][^）)]*[）)]\s*[：:]\s*([^\n，,。;；（(]{2,50})",
+        r"甲方\s*[：:]\s*([^\n，,。;；（(]{2,50})",
+    ],
+    "party_b": [
+        r"乙方[（(][^）)]*[）)]\s*[：:]\s*([^\n，,。;；（(]{2,50})",
+        r"乙方\s*[：:]\s*([^\n，,。;；（(]{2,50})",
+    ],
+    # 金额：捕获数字串与可选“万”，归一化为数值元
+    "amount": [r"(?:合同总?金额|总价|总金额)[^0-9]{0,12}?([0-9][0-9,，]*(?:\.[0-9]+)?)\s*(万)?\s*元"],
+    "currency": [r"(?:币种|货币)\s*[：:]\s*(\S{1,10})"],
+    "effective_date": [r"(?:生效日期|生效时间)\s*[：:]?\s*((?:19|20)\d{2}\s*[年.\-/].{0,10})"],
+    "expire_date": [r"(?:到期日期|到期时间|终止日期)\s*[：:]?\s*((?:19|20)\d{2}\s*[年.\-/].{0,10})"],
 }
 
-CLAUSE_KEYWORDS = {
+_TITLE_FALLBACK_RE = re.compile(r"^#{0,3}\s*\**(.{2,40}?(?:合同|协议))\**\s*$", re.M)
+
+CLAUSE_KEYWORDS: dict[str, list[str]] = {
     "payment_clause": ["付款", "支付", "预付", "尾款", "结算"],
     "delivery_clause": ["交付", "交货", "供货", "工期"],
-    "acceptance_clause": ["验收", "检验", "合格标准"],
+    "acceptance_clause": ["验收", "检验标准"],
     "breach_clause": ["违约", "赔偿", "责任"],
-    "confidential_clause": ["保密", "机密", "披露"],
+    "confidential_clause": ["保密", "机密"],
     "data_clause": ["个人信息", "数据安全", "数据处理"],
-    "ip_clause": ["知识产权", "著作权", "专利", "成果归属"],
+    "ip_clause": ["知识产权", "著作权", "成果归属"],
     "dispute_clause": ["争议", "纠纷", "管辖", "仲裁", "诉讼"],
 }
 
 
+def _field_entry(value, pos: int | None, status: str, **extra) -> dict:
+    entry = {"value": value, "pos": pos, "status": status}
+    entry.update(extra)
+    return entry
+
+
 def extract_structured(text: str) -> dict:
     """正则兜底提取基本信息与八类条款定位（LLM 增强在 services 层叠加）。"""
-    basic = {}
+    basic: dict[str, dict] = {}
     for field, patterns in BASIC_PATTERNS.items():
+        entry = _field_entry(None, None, "missing")
         for pat in patterns:
             m = re.search(pat, text)
-            if m:
-                basic[field] = {"value": m.group(1).strip(),
-                                "pos": m.start(), "status": "ok"}
-                break
-        else:
-            basic[field] = {"value": None, "pos": None, "status": "missing"}
+            if not m:
+                continue
+            raw = m.group(1).strip()
+            if field == "amount":
+                raw_amount = re.sub(r"^[^0-9]+", "", m.group(0))  # 从原匹配截取，保留原始空格
+                entry = _field_entry(
+                    _norm_amount_yuan(m.group(1), bool(m.group(2))),
+                    m.start(), "ok",
+                    raw_text=raw_amount, unit="CNY")
+            elif field in ("effective_date", "expire_date"):
+                normalized = _norm_date(raw)
+                if normalized:
+                    entry = _field_entry(normalized, m.start(), "ok", raw_text=raw)
+                continue
+            else:
+                entry = _field_entry(raw, m.start(), "ok")
+            break
+        basic[field] = entry
 
-    clauses = {}
+    # 标题回退：首个形如「……合同/协议」的行（含 md 标题），status=inferred
+    if basic["contract_title"]["status"] == "missing":
+        m = _TITLE_FALLBACK_RE.search(text)
+        if m:
+            basic["contract_title"] = _field_entry(m.group(1).strip(), m.start(1), "inferred")
+
+    # 币种推断：全文出现货币词且未显式声明
+    if basic["currency"]["status"] == "missing":
+        idx = next((text.find(w) for w in _CURRENCY_WORDS if text.find(w) >= 0), -1)
+        if idx >= 0:
+            word = next(w for w in _CURRENCY_WORDS if text.find(w) == idx)
+            basic["currency"] = _field_entry(word, idx, "inferred")
+
+    clauses: dict[str, dict] = {}
     for name, keywords in CLAUSE_KEYWORDS.items():
         found = None
         for kw in keywords:
@@ -141,9 +218,10 @@ def extract_structured(text: str) -> dict:
                 found = {"keywords_hit": kw, "snippet": snippet,
                          "pos": idx, "status": "present"}
                 break
-        clauses[name] = found or {"status": "absent"}
+        clauses[name] = found or {"keywords_hit": None, "snippet": None,
+                                  "pos": None, "status": "absent"}
 
-    return {"basic_info": basic, "clauses": clauses}
+    return {"basic_info": basic, "clauses": clauses, "meta": {"char_len": len(text)}}
 
 
 def safe_json_loads(raw: str | None, default):
