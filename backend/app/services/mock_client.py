@@ -15,12 +15,22 @@ def _client() -> httpx.Client:
                         transport=transport)
 
 
+def _unwrap(body):
+    """兼容 mock 的 {code,data} 信封与裸数组/裸对象三种形态。"""
+    if isinstance(body, dict) and "data" in body:
+        body = body["data"]
+    return body
+
+
 def list_pending(limit: int = 20) -> list[dict]:
     try:
         with _client() as c:
             r = c.get("/mock/approvals", params={"limit": limit})
             r.raise_for_status()
-            return r.json()["items"]
+            body = _unwrap(r.json())
+            if isinstance(body, dict):
+                body = body.get("items", [])
+            return body
     except ToolError:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -34,7 +44,7 @@ def get_detail(instance_id: str) -> dict:
             if r.status_code == 404:
                 raise ToolError("APPROVAL_NOT_FOUND", f"审批单不存在: {instance_id}")
             r.raise_for_status()
-            return r.json()
+            return _unwrap(r.json())
     except ToolError:
         raise
     except Exception as exc:  # noqa: BLE001

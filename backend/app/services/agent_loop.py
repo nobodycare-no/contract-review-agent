@@ -169,17 +169,28 @@ class RunController:
         except LLMUnavailable as exc:
             self.breaker.record_failure()
             downgraded = _CHANNEL_FALLBACK.get(channel)
-            if downgraded and downgraded != "deterministic":
+            if downgraded == "deterministic":
+                log_event(logger, 30, "channel downgrade", run_id=run.id,
+                          kind=f"{channel}->deterministic", err=str(exc)[:160])
+                run.channel = self.channel = "deterministic"
+                self.fallback_kind = self.fallback_kind or "llm_down"
+                FALLBACKS.labels(kind="llm_down").inc()
+                self.db.commit()
+                run_deterministic(self.ctx)   # 就地执行确定性计划（ADR-B5）
+                steps_used += 1
+                channel = "deterministic"
+                status = "succeeded" if self.ctx.written else "failed"
+            elif downgraded:
                 log_event(logger, 30, "channel downgrade", run_id=run.id,
                           kind=f"{channel}->{downgraded}", err=str(exc)[:160])
                 run.channel = self.channel = downgraded
-                self.fallback_kind = self.fallback_kind or (
-                    "llm_down" )
+                self.fallback_kind = self.fallback_kind or "llm_down"
                 FALLBACKS.labels(kind="llm_down").inc()
                 self.db.commit()
                 return self._execute(run)   # 以降级通道重启同一 run
-            self.fallback_kind = "llm_down"
-            status, error_digest = "blocked", f"LLM_UNAVAILABLE: {exc}"[:500]
+            else:
+                self.fallback_kind = "llm_down"
+                status, error_digest = "blocked", f"LLM_UNAVAILABLE: {exc}"[:500]
         except Exception as exc:  # noqa: BLE001
             status, error_digest = "failed", f"{type(exc).__name__}: {exc}"[:500]
 

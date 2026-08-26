@@ -43,9 +43,17 @@ def update_rule(rule_code: str, payload: dict, db: Session = Depends(get_db)) ->
 
 
 @router.post("/reset-demo", dependencies=[Depends(require_admin)])
-def reset_demo() -> dict:
+def reset_demo(db: Session = Depends(get_db)) -> dict:
+    """mock 注册表复位 + app 业务库清空——完整演示复现点。"""
+    from app.models import AgentRun, ApprovalAttachment, ApprovalTask, \
+        CommentLog, ContractParse, ReviewResult, RuleHit, TaskLog
+
     try:
         mock_client.reset_mock()
-        return {"reset": True}
     except ToolError as exc:
         raise HTTPException(502, str(exc))
+    for model in (AgentRun, CommentLog, ReviewResult, RuleHit, ContractParse,
+                  ApprovalAttachment, TaskLog, ApprovalTask):
+        db.query(model).delete()
+    db.commit()
+    return {"reset": True}

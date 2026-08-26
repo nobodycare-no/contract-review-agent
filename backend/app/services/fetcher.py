@@ -27,20 +27,22 @@ def sync_pending_approvals(db: Session, limit: int = 20) -> dict:
     items = mock_client.list_pending(limit=limit)
     created = updated = 0
     for item in items:
-        task = db.query(ApprovalTask).filter_by(
-            approval_code=item["approval_code"]).one_or_none()
+        code = item.get("approval_code")
+        title = item.get("approval_title") or item.get("title") or ""
+        applicant = item.get("applicant_name") or item.get("applicant") or ""
+        task = db.query(ApprovalTask).filter_by(approval_code=code).one_or_none()
         if task is None:
             task = ApprovalTask(
-                approval_code=item["approval_code"],
-                approval_title=item["title"],
-                applicant_name=item["applicant"],
+                approval_code=code,
+                approval_title=title,
+                applicant_name=applicant,
                 instance_id=item["instance_id"])
             db.add(task)
             created += 1
             continue
         changed = False
-        for key, value in (("approval_title", item["title"]),
-                           ("applicant_name", item["applicant"]),
+        for key, value in (("approval_title", title),
+                           ("applicant_name", applicant),
                            ("instance_id", item["instance_id"])):
             if getattr(task, key) != value:
                 setattr(task, key, value)
