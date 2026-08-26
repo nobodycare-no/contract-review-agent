@@ -23,6 +23,12 @@ def create_app() -> FastAPI:
     app = FastAPI(title="contract-review-agent", version="1.2.0")
     app.state.llm_probe_cache: dict = {"ts": 0.0, "ok": None}  # type: ignore[attr-defined]
 
+    from app.api.agent import router as agent_router
+    from app.api.tools import router as tools_router
+
+    app.include_router(tools_router)
+    app.include_router(agent_router)
+
     @app.get("/health")
     def health() -> dict:
         """组件级健康探测（N04）：mysql/mock/llm；任一失败 status=degraded 但仍 200。"""

@@ -1,0 +1,89 @@
+"""Agent/管理面（T5 子集：任务查询/重试/日志）；run 与 runs 断点恢复在 T6 注册。"""
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from app.db import get_db
+from app.models import ApprovalAttachment, ApprovalTask, CommentLog, ContractParse, \
+    ReviewResult, RuleHit, TaskLog
+from app.services.state_machine import retry_task
+from app.services.tool_errors import ToolError
+
+router = APIRouter(prefix="/agent", tags=["agent"])
+
+
+@router.get("/tasks")
+def list_tasks(db: Session = Depends(get_db)) -> dict:
+    tasks = db.query(ApprovalTask).order_by(ApprovalTask.id.desc()).all()
+    return {"tasks": [{
+        "id": t.id, "approval_code": t.approval_code, "title": t.approval_title,
+        "applicant": t.applicant_name, "instance_id": t.instance_id,
+        "task_status": t.task_status, "write_status": t.write_status,
+        "block_reason": t.block_reason,
+    } for t in tasks]}
+
+
+@router.get("/tasks/{task_id}")
+def task_detail(task_id: int, db: Session = Depends(get_db)) -> dict:
+    task = db.query(ApprovalTask).filter_by(id=task_id).one_or_none()
+    if task is None:
+        raise HTTPException(404, "任务不存在")
+    parse_row = db.query(ContractParse).filter_by(task_id=task_id)\
+        .order_by(ContractParse.id.desc()).first()
+    hits = db.query(RuleHit).filter_by(task_id=task_id).all()
+    review = db.query(ReviewResult).filter_by(task_id=task_id)\
+        .order_by(ReviewResult.id.desc()).first()
+    comments = db.query(CommentLog).filter_by(task_id=task_id)\
+        .order_by(CommentLog.id).all()
+
+    def hit_view(h: RuleHit):
+        rule = h.rule if hasattr(h, "rule") else None
+        name = getattr(rule, "rule_name", f"rule#{h.rule_id}")
+        level = getattr(rule, "risk_level", "")
+        return {"rule_id": h.rule_id, "rule_name": name, "risk_level": level,
+                "hit_status": h.hit_status, "evidence": h.evidence_text[:300],
+                "position": h.evidence_position}
+
+    return {
+        "task": {"id": task.id, "approval_code": task.approval_code,
+                 "title": task.approval_title, "applicant": task.applicant_name,
+                 "instance_id": task.instance_id, "task_status": task.task_status,
+                 "write_status": task.write_status, "block_reason": task.block_reason},
+        "attachments": [{"attachment_id": a.attachment_id, "file_name": a.file_name,
+                         "file_type": a.file_type, "download_status": a.download_status}
+                        for a in db.query(ApprovalAttachment).filter_by(task_id=task_id)],
+        "parse": None if parse_row is None else {
+            "parse_status": parse_row.parse_status,
+            "basic_info": parse_row.basic_info_json,
+            "clauses": parse_row.clause_info_json,
+            "error": parse_row.parse_error},
+        "hits": [hit_view(h) for h in hits],
+        "review": None if review is None else {
+            "review_id": review.id, "overall_risk_level": review.overall_risk_level,
+            "summary_text": review.summary_text,
+            "focus_points": review.focus_points_json,
+            "comment_text": review.comment_text},
+        "comment_logs": [{"write_status": c.write_status,
+                          "response": c.write_response_text} for c in comments],
+    }
+
+
+@router.post("/tasks/{task_id}/retry")
+def retry(task_id: int, db: Session = Depends(get_db)) -> dict:
+    task = db.query(ApprovalTask).filter_by(id=task_id).one_or_none()
+    if task is None:
+        raise HTTPException(404, "任务不存在")
+    try:
+        stage = retry_task(db, task)
+    except ToolError as exc:
+        raise HTTPException(409, str(exc))
+    return {"task_id": task.id, "resumed_stage": stage}
+
+
+@router.get("/tasks/{task_id}/logs")
+def task_logs(task_id: int, db: Session = Depends(get_db)) -> dict:
+    rows = db.query(TaskLog).filter_by(task_id=task_id).order_by(TaskLog.id).all()
+    return {"logs": [{"level": r.log_level, "type": r.log_type,
+                      "content": r.log_content, "created_at": str(r.created_at)}
+                     for r in rows]}
