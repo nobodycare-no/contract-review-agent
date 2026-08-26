@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS approval_attachments (
 CREATE TABLE IF NOT EXISTS contract_parses (
     id               BIGINT AUTO_INCREMENT PRIMARY KEY,
     task_id          BIGINT NOT NULL COMMENT '逻辑FK approval_tasks.id',
+    raw_text         MEDIUMTEXT NULL COMMENT '解析全文(工程超集·偏差登记:规则重跑免二次下载)',
     basic_info_json  JSON NULL COMMENT '标题/编号/主体/对方/金额/币种/生效/到期',
     clause_info_json JSON NULL COMMENT '八类条款: {name: {text,pos,status}}',
     parse_status     VARCHAR(16) NOT NULL DEFAULT 'pending' COMMENT 'pending|done|failed',

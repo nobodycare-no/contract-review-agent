@@ -39,6 +39,7 @@ class ContractParse(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task_id: Mapped[int] = mapped_column(Integer, index=True)
+    raw_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # 工程超集（偏差登记）
     basic_info_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     clause_info_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     parse_status: Mapped[str] = mapped_column(String(16), default="pending")

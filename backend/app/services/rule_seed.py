@@ -7,7 +7,7 @@ from __future__ import annotations
 SEED_RULES: list[dict] = [
     {
         "rule_code": "PAY_ADVANCE_HIGH", "rule_name": "预付款比例过高", "risk_level": "high",
-        "match_mode": "regex", "match_text": r"预付[^。]{0,10}?([0-9]+)\s*%",
+        "match_mode": "regex", "match_text": r"预付[^。]{0,14}?([0-9]+)\s*%",
         "suggestion_text": "预付款比例超过30%，建议压降或增设担保措施。",
     },
     {
