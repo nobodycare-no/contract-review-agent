@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS review_rules (
     match_mode      VARCHAR(16) NOT NULL COMMENT 'keyword|regex|absence',
     match_text      TEXT NOT NULL COMMENT '关键词/正则/缺失探测关键词组(逗号分隔)',
     suggestion_text VARCHAR(512) NOT NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '工程超集字段(偏差登记)',
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_rule_code (rule_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -102,4 +103,28 @@ CREATE TABLE IF NOT EXISTS task_logs (
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     KEY idx_tlogs_task (task_id),
     KEY idx_tlogs_time (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Agent 运行记录（第九表·工程超集·偏差已登记：断点恢复/预算审计/降级溯源）
+CREATE TABLE IF NOT EXISTS agent_runs (
+    id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+    task_id           BIGINT NOT NULL,
+    channel           VARCHAR(16) NOT NULL DEFAULT 'pending' COMMENT 'native|json|deterministic|pending',
+    status            VARCHAR(16) NOT NULL DEFAULT 'running' COMMENT 'running|succeeded|blocked|failed',
+    dry_run           TINYINT NOT NULL DEFAULT 0,
+    steps_used        INT NOT NULL DEFAULT 0,
+    prompt_tokens     INT NOT NULL DEFAULT 0,
+    completion_tokens INT NOT NULL DEFAULT 0,
+    llm_calls         INT NOT NULL DEFAULT 0,
+    wall_ms           INT NOT NULL DEFAULT 0,
+    fallback_kind     VARCHAR(32) NULL COMMENT 'budget_steps|budget_tokens|budget_wall|circuit_open|llm_down|model_no_write',
+    prompt_version    VARCHAR(32) NOT NULL DEFAULT '',
+    model_name        VARCHAR(64) NOT NULL DEFAULT '',
+    messages_json     JSON NULL COMMENT '最近消息快照(resume源)',
+    error_digest      VARCHAR(512) NULL,
+    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    finished_at       DATETIME NULL,
+    KEY idx_runs_task (task_id),
+    KEY idx_runs_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

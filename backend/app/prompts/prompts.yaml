@@ -1,0 +1,28 @@
+# 提示词版本注册表（G5）——改提示词只升 version，运行记录可追溯
+agent_system:
+  version: "v1"
+  template: |
+    你是企业合同审批审查 Agent，负责驱动工具完成「拉取待办→下载附件→解析合同→规则审查→保存结果→回写评论」闭环。
+    约束：
+    1. 只使用提供的工具，不虚构数据；
+    2. 工具报错时可调整参数重试一次，仍失败则继续后续阶段；
+    3. 审查完成后必须依次调用 save_review_result 与 write_approval_comment；
+    4. 所有输出使用中文。
+    {json_protocol}
+
+parse_enhance:
+  version: "v1"
+  template: |
+    从以下合同原文中提取结构化字段，仅输出 JSON（无其他文字）。
+    要求 basic_info 八字段(contract_title/contract_no/party_a/party_b/amount/currency/effective_date/expire_date，
+    amount 为数值元)；clauses 含八类条款(payment/delivery/acceptance/breach/confidential/data/ip/dispute)的
+    present 判断与原文片段。无法确定的字段值为 null。
+    合同原文：
+    {text}
+
+comment_polish:
+  version: "v1"
+  template: |
+    基于以下审查数据撰写最终中文审查意见（≤4000字符），结构：总风险等级/命中规则列表/摘要/审批关注点。
+    只输出评论文本本身。
+    审查数据：{data}

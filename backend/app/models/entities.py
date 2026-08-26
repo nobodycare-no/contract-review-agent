@@ -102,3 +102,29 @@ class TaskLog(Base):
     log_type: Mapped[str] = mapped_column(String(32), default="")
     log_content: Mapped[str] = mapped_column(String(1024))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class AgentRun(TimestampMixin, Base):
+    """Agent 运行记录（规范八表之外的工程超集，偏差已登记）。
+
+    支撑断点恢复(messages_json 快照)、预算审计(steps/tokens/wall)、降级溯源(fallback_kind)。
+    """
+
+    __tablename__ = "agent_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[int] = mapped_column(Integer, index=True)
+    channel: Mapped[str] = mapped_column(String(16), default="pending")   # native|json|deterministic|pending
+    status: Mapped[str] = mapped_column(String(16), default="running", index=True)  # running|succeeded|blocked|failed
+    dry_run: Mapped[int] = mapped_column(SmallInteger, default=0)
+    steps_used: Mapped[int] = mapped_column(Integer, default=0)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    llm_calls: Mapped[int] = mapped_column(Integer, default=0)
+    wall_ms: Mapped[int] = mapped_column(Integer, default=0)
+    fallback_kind: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    prompt_version: Mapped[str] = mapped_column(String(32), default="")
+    model_name: Mapped[str] = mapped_column(String(64), default="")
+    messages_json: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    error_digest: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

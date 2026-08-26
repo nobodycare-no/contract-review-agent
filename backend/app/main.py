@@ -1,0 +1,76 @@
+"""FastAPI 应用装配——T2 骨架：健康(组件级) + 指标 + 静态挂载；业务路由由后续切片注册。"""
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+import httpx
+from fastapi import FastAPI
+from fastapi.responses import Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from sqlalchemy import text
+
+from app.core.config import get_settings
+from app.core.obs import setup_logging
+from app.db import SessionLocal
+
+_LLM_PROBE_TTL_S = 30.0
+
+
+def create_app() -> FastAPI:
+    settings = get_settings()
+    setup_logging()
+    app = FastAPI(title="contract-review-agent", version="1.2.0")
+    app.state.llm_probe_cache: dict = {"ts": 0.0, "ok": None}  # type: ignore[attr-defined]
+
+    @app.get("/health")
+    def health() -> dict:
+        """组件级健康探测（N04）：mysql/mock/llm；任一失败 status=degraded 但仍 200。"""
+        components: dict[str, dict] = {}
+
+        t0 = time.perf_counter()
+        try:
+            with SessionLocal() as db:
+                db.execute(text("SELECT 1"))
+            components["mysql"] = {"ok": True, "latency_ms": round((time.perf_counter() - t0) * 1000, 1)}
+        except Exception as exc:  # noqa: BLE001 —— 健康面必须吞错降级
+            components["mysql"] = {"ok": False, "error": str(exc)[:200]}
+
+        try:
+            resp = httpx.get(f"{settings.mock_base_url}/health", timeout=3.0)
+            components["mock"] = {"ok": resp.status_code == 200}
+        except Exception as exc:  # noqa: BLE001
+            components["mock"] = {"ok": False, "error": str(exc)[:200]}
+
+        if not settings.llm_base_url:
+            components["llm"] = {"ok": None, "note": "not_configured"}
+        else:
+            cache = app.state.llm_probe_cache
+            now = time.monotonic()
+            if now - cache["ts"] > _LLM_PROBE_TTL_S and cache["ok"] is not False or cache["ts"] == 0.0:
+                try:
+                    resp = httpx.get(f"{settings.llm_base_url.rstrip('/')}/models", timeout=3.0)
+                    ok = resp.status_code == 200
+                except Exception:  # noqa: BLE001
+                    ok = False
+                cache.update(ts=now, ok=ok)
+            components["llm"] = {"ok": cache["ok"], "cached": True}
+
+        degraded = any(c.get("ok") is False for c in components.values())
+        return {"status": "degraded" if degraded else "ok", "components": components}
+
+    @app.get("/metrics")
+    def metrics() -> Response:
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+    # Web 工作台静态挂载（T7）：路由优先于挂载，/ 前缀不遮蔽 API
+    web_dist = Path(__file__).resolve().parents[2] / "web" / "dist"
+    if web_dist.exists():
+        from fastapi.staticfiles import StaticFiles
+
+        app.mount("/", StaticFiles(directory=str(web_dist), html=True), name="web")
+
+    return app
+
+
+app = create_app()

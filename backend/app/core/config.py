@@ -29,6 +29,27 @@ class Settings(BaseSettings):
     # 内部管理令牌（管理员接口）
     admin_token: str = "change-me-admin"
 
+    # ===== RunController 三维预算（ADR-B8）=====
+    agent_max_steps: int = 12          # 规范字面上限
+    agent_token_budget: int = 24000    # prompt+completion 累计
+    agent_wall_budget_s: int = 180     # 运行墙钟时限
+
+    # ===== 熔断器 =====
+    circuit_fail_threshold: int = 3
+    circuit_open_seconds: int = 60
+
+    # ===== 工具超时（秒）=====
+    mock_timeout_s: int = 15
+    download_timeout_s: int = 30
+    parse_timeout_s: int = 90
+    rules_timeout_s: int = 10
+
+    # ===== 轨迹录制（ADR-B9）：非空则录制到 tests/fixtures/trajectories/<名>.jsonl =====
+    record_trajectory: str = ""
+
+    # 后台运行模式轮询间隔提示（供 Web/CLI 使用）
+    run_poll_interval_ms: int = 1000
+
 
 @lru_cache
 def get_settings() -> Settings:
