@@ -14,7 +14,7 @@ def test_health_reports_components(client: TestClient) -> None:
     body = resp.json()
     assert body["status"] in {"ok", "degraded"}
     comps = body["components"]
-    assert set(comps) == {"mysql", "mock", "llm"}
+    assert set(comps) == {"mysql", "forms", "llm"}
     assert isinstance(comps["mysql"]["ok"], bool)
     assert comps["llm"]["ok"] is None and comps["llm"]["note"] == "not_configured"
 

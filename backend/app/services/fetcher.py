@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.obs import TOOL_CALLS, get_logger, log_event
 from app.models import ApprovalAttachment, ApprovalTask
-from app.services import mock_client
+from app.services import approval_store
 
 logger = get_logger("fetcher")
 
@@ -24,7 +24,7 @@ def _safe_name(name: str) -> str:
 
 def sync_pending_approvals(db: Session, limit: int = 20) -> dict:
     """唯一业务标识(approval_code)去重：存在即更新可变字段，绝不重建。"""
-    items = mock_client.list_pending(limit=limit)
+    items = approval_store.list_pending(limit=limit)
     created = updated = 0
     for item in items:
         code = item.get("approval_code")
@@ -54,7 +54,7 @@ def sync_pending_approvals(db: Session, limit: int = 20) -> dict:
 
 
 def ensure_attachment_rows(db: Session, task: ApprovalTask) -> list[ApprovalAttachment]:
-    detail = mock_client.get_detail(task.instance_id)
+    detail = approval_store.get_detail(task.instance_id)
     existing = {a.attachment_id for a in db.query(ApprovalAttachment)
                 .filter_by(task_id=task.id)}
     rows: list[ApprovalAttachment] = []
@@ -67,7 +67,8 @@ def ensure_attachment_rows(db: Session, task: ApprovalTask) -> list[ApprovalAtta
                                      attachment_id=att["attachment_id"],
                                      file_name=att["file_name"],
                                      file_type=Path(att["file_name"]).suffix.lstrip(".").lower(),
-                                     file_path="", download_status="pending")
+                                     file_path=att.get("file_path", ""),
+                                     download_status="pending")
             db.add(row)
         rows.append(row)
     db.commit()
@@ -75,33 +76,23 @@ def ensure_attachment_rows(db: Session, task: ApprovalTask) -> list[ApprovalAtta
 
 
 def download_all(db: Session, task: ApprovalTask) -> list[ApprovalAttachment]:
-    """逐附件下载→sha256→落盘；全部成功置 done。任何失败抛 ToolError 由上层决定 blocked。"""
-    settings = get_settings()
+    """本地化：源文件已在系统盘，规范化复制到任务目录并置 done（含 SHA 留痕）。"""
     rows = ensure_attachment_rows(db, task)
     if not rows:
         from app.services.tool_errors import ToolError
 
         raise ToolError("ATTACHMENT_MISSING", "审批单没有任何附件",
                         block_stage="parsing")
-    base = Path(settings.upload_dir) / str(task.id)
-    base.mkdir(parents=True, exist_ok=True)
+    from app.services import approval_store as store
+
     try:
-        for row in rows:
-            if row.download_status == "done" and row.file_path and \
-                    Path(row.file_path.replace("/srv/storage", settings.upload_dir)).exists():
-                continue
-            content, name = mock_client.download_attachment(task.instance_id, row.attachment_id)
-            safe = _safe_name(name or f"{row.attachment_id}.bin")
-            target = base / safe
-            target.write_bytes(content)
-            row.file_name = name or safe
-            row.file_path = str(target)
-            row.download_status = "done"
-            log_event(logger, 20, "attachment saved", task_id=task.id,
-                      kind=f"{safe}:{hashlib.sha256(content).hexdigest()[:12]}:{len(content)}B")
+        store.materialize_into_task_dir(task.id)
+        db.expire_all()   # 让复制后的路径/状态回到当前会话视图
+        rows = [db.query(ApprovalAttachment)
+                .filter_by(task_id=task.id, attachment_id=r.attachment_id).one()
+                for r in rows]
         db.commit()
-    except Exception:
-        db.rollback()
+    except Exception:  # noqa: BLE001
         for row in rows:
             if row.download_status != "done":
                 row.download_status = "failed"
@@ -109,9 +100,3 @@ def download_all(db: Session, task: ApprovalTask) -> list[ApprovalAttachment]:
         raise
     TOOL_CALLS.labels(tool="download_attachment", outcome="done").inc()
     return rows
-
-
-def container_path(stored_path: str) -> str:
-    """宿主 UPLOAD_DIR 与容器内 /srv/storage 的路径换算。"""
-    settings = get_settings()
-    return stored_path.replace(settings.upload_dir, "/srv/storage", 1)

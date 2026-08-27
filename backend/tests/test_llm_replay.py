@@ -9,35 +9,18 @@ from pathlib import Path
 import pytest
 from sqlalchemy.orm import Session
 
+from tests.factory import make_form, post_spy
+
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "trajectories"
 CASES = sorted(p.stem for p in FIXTURE_DIR.glob("*.jsonl")) if FIXTURE_DIR.exists() else []
 
 
 @pytest.fixture()
 def fake_mock(monkeypatch):
-    """与 test_runcontroller 同款进程内假外部系统（模块间夹具不复用）。"""
-    posted: list[str] = []
+    """真实本地审批域 + 回写捕获（外部模拟系统已物理移除）。"""
+    from tests.factory import make_form, post_spy
 
-    def fake_detail(instance_id):
-        return {"attachments": [{"attachment_id": "att-a", "file_name": "合同.docx"}],
-                "instance_id": instance_id}
-
-    def fake_download(instance_id, attachment_id):
-        from tests.test_tools_pipeline import _docx_bytes
-
-        return _docx_bytes(), "合同.docx"
-
-    def fake_post(instance_id, comment_text):
-        posted.append(comment_text)
-        return {"write_status": "success", "comment_id": len(posted)}
-
-    import app.services.mock_client as mc
-
-    monkeypatch.setattr(mc, "list_pending", lambda limit=20: [])
-    monkeypatch.setattr(mc, "get_detail", fake_detail)
-    monkeypatch.setattr(mc, "download_attachment", fake_download)
-    monkeypatch.setattr(mc, "post_comment", fake_post)
-    return {"posted": posted}
+    return {"posted": post_spy(monkeypatch)}
 
 
 @pytest.mark.skipif(not CASES, reason="尚无录制轨迹——GPU 联调后生成")
@@ -53,10 +36,8 @@ class TestReplayRealTrajectories:
         case = CASES[0]
         transport = ReplayTransport(case)
 
-        task_model = __import__("app.models", fromlist=["ApprovalTask"]).ApprovalTask
-        task = task_model(approval_code=f"T-REPLAY-{case[:6]}",
-                          approval_title="回放回归", applicant_name="CI",
-                          instance_id="inst-001")
+        task = make_form(db_session, code=f"RP-{case[:6]}", title="回放回归",
+                         applicant="CI", files=1)
         db_session.add(task)
         db_session.commit()
 

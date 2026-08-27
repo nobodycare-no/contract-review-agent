@@ -1,4 +1,4 @@
-"""七工具 API（Agent 与 CLI 共用执行器）：统一包络 {ok, data|error}。"""
+﻿"""七工具 API（Agent 与 CLI 共用执行器）：统一包络 {ok, data|error}。"""
 from __future__ import annotations
 
 from typing import Any
@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import ApprovalTask, ReviewResult
-from app.services import fetcher, mock_client, reviewer
+from app.services import approval_store, fetcher, reviewer
 from app.services.rule_engine import run_task_rules
 from app.services.tool_errors import ToolError
 
@@ -60,7 +60,7 @@ async def list_pending(req: dict, db: Session = Depends(get_db)) -> dict:
 @router.post("/get_approval")
 async def get_approval(req: dict, db: Session = Depends(get_db)) -> dict:
     try:
-        detail = mock_client.get_detail(req["instance_id"])
+        detail = approval_store.get_detail(req["instance_id"])
         task = _task_by(db, instance_id=req["instance_id"])
         return _ok({"detail": detail,
                     "local": {"task_id": task.id, "task_status": task.task_status,

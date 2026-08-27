@@ -1,4 +1,4 @@
-"""管理面（X-Admin-Token 常量时比较）：规则启停 / 演示重置 / 日志别名。"""
+﻿"""管理面（X-Admin-Token 常量时比较）：规则启停 / 演示重置 / 日志别名。"""
 from __future__ import annotations
 
 import hmac
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db import get_db
 from app.models import ReviewRule
-from app.services import mock_client
+from app.services import approval_store
 from app.services.tool_errors import ToolError
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -49,7 +49,7 @@ def reset_demo(db: Session = Depends(get_db)) -> dict:
         CommentLog, ContractParse, ReviewResult, RuleHit, TaskLog
 
     try:
-        mock_client.reset_mock()
+        approval_store.reset_demo()
     except ToolError as exc:
         raise HTTPException(502, str(exc))
     for model in (AgentRun, CommentLog, ReviewResult, RuleHit, ContractParse,

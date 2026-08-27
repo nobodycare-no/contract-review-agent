@@ -1,4 +1,4 @@
-"""解析与审查编排服务（FR-B/FR-D）：解析管线、评论生成、结果保存、幂等回写。"""
+﻿"""解析与审查编排服务（FR-B/FR-D）：解析管线、评论生成、结果保存、幂等回写。"""
 from __future__ import annotations
 
 import re
@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.obs import TOOL_CALLS, get_logger, log_event
 from app.models import ApprovalAttachment, ApprovalTask, CommentLog, ContractParse, ReviewResult
-from app.services import mock_client
+from app.services import approval_store
 from app.services.parser import ParseError, extract_raw_text, extract_structured
 from app.services.state_machine import block_task, transition
 from app.services.tool_errors import ToolError
@@ -133,7 +133,7 @@ def write_comment(db: Session, task: ApprovalTask, review: ReviewResult) -> dict
     db.add(CommentLog(task_id=task.id, write_status="writing", write_response_text=None))
     db.commit()
     try:
-        resp = mock_client.post_comment(task.instance_id, review.comment_text)
+        resp = approval_store.post_comment(task.instance_id, review.comment_text)
         fresh.write_status = "success"
         db.add(CommentLog(task_id=task.id, write_status="success",
                           write_response_text=str(resp)[:500]))

@@ -9,7 +9,6 @@ from app.core.config import get_settings
 from app.core.obs import reset_circuit_breaker
 from app.models import AgentRun, ApprovalTask, ReviewResult
 from app.services.agent_loop import RunController
-from app.services.llm_client import LLMUnavailable
 from app.tools_registry import parse_protocol_line
 
 
@@ -36,31 +35,10 @@ class ScriptedLLM:
 
 @pytest.fixture()
 def fake_mock(monkeypatch):
-    posted: list[str] = []
+    """回写捕获器：真实本地回写之上包一层记录（字典键与旧断言兼容）。"""
+    from tests.factory import post_spy
 
-    def fake_detail(instance_id):
-        return {"attachments": [{"attachment_id": "att-a", "file_name": "合同.docx"}],
-                "instance_id": instance_id}
-
-    def fake_download(instance_id, attachment_id):
-        from tests.test_tools_pipeline import _docx_bytes
-
-        return _docx_bytes(), "合同.docx"
-
-    def fake_post(instance_id, comment_text):
-        posted.append(comment_text)
-        return {"write_status": "success", "comment_id": len(posted)}
-
-    def fake_list(limit=20):
-        return []
-
-    import app.services.mock_client as mc
-
-    monkeypatch.setattr(mc, "list_pending", fake_list)
-    monkeypatch.setattr(mc, "get_detail", fake_detail)
-    monkeypatch.setattr(mc, "download_attachment", fake_download)
-    monkeypatch.setattr(mc, "post_comment", fake_post)
-    return {"posted": posted}
+    return {"posted": post_spy(monkeypatch)}
 
 
 @pytest.fixture(autouse=True)
@@ -78,14 +56,11 @@ def force_native(monkeypatch):
     monkeypatch.setattr(lc, "probe_native_tools", lambda transport=None: True)
 
 
-def _make_task(db: Session, code="AP-Z-001") -> ApprovalTask:
-    from tests.test_tools_pipeline import FAKE_ITEMS  # noqa: F401 —— 数据一致性提示
+def _make_task(db: Session, code="AP-Z-001"):
+    """经真实工厂建单（附件落盘可解析）。"""
+    from tests.factory import make_form
 
-    task = ApprovalTask(approval_code=code, approval_title="采购合同审批",
-                        applicant_name="王铁柱", instance_id="inst-001")
-    db.add(task)
-    db.commit()
-    return task
+    return make_form(db, code=code, title="采购合同审批")
 
 
 HAPPY_NATIVE = [_tc("download_contract_attachment"),
@@ -125,7 +100,7 @@ class TestNativeHappyPath:
         assert run.prompt_version == "v1" and run.model_name
         assert fake_mock["posted"] and "总风险等级" in fake_mock["posted"][0]
 
-        db_session.refresh(task)
+        task = db_session.query(ApprovalTask).filter_by(id=task.id).one()
         assert task.task_status == "done" and task.write_status == "success"
         assert any(t["tool"] == "run_contract_rules" for t in controller.ctx.trace)
 
@@ -180,7 +155,7 @@ class TestDryRun:
 
         assert run.status == "succeeded" and run.dry_run == 1
         assert fake_mock["posted"] == []
-        db_session.refresh(task)
+        task = db_session.query(ApprovalTask).filter_by(id=task.id).one()
         assert task.task_status == "reviewing"
         assert task.write_status == "not_written"
         assert db_session.query(ReviewResult).filter_by(task_id=task.id).count() == 1

@@ -1,4 +1,4 @@
-"""集中配置——全部来自环境变量。"""
+﻿"""集中配置——全部来自环境变量。"""
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,8 +16,6 @@ class Settings(BaseSettings):
     llm_model: str = "qwen3-8b"
     llm_timeout_s: int = 120
 
-    # mock 审批系统（服务间）
-    mock_base_url: str = "http://mock-approval:8100"
 
     # OCR
     tesseract_cmd: str = ""          # 空则用系统 PATH 中的 tesseract
@@ -39,7 +37,7 @@ class Settings(BaseSettings):
     circuit_open_seconds: int = 60
 
     # ===== 工具超时（秒）=====
-    mock_timeout_s: int = 15
+    tool_timeout_s: int = 15
     download_timeout_s: int = 30
     parse_timeout_s: int = 90
     rules_timeout_s: int = 10

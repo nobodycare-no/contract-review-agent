@@ -33,22 +33,21 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     def health() -> dict:
-        """组件级健康探测（N04）：mysql/mock/llm；任一失败 status=degraded 但仍 200。"""
+        """组件级健康探测（N04）：mysql/审批域/llm；任一失败 status=degraded 但仍 200。"""
         components: dict[str, dict] = {}
 
         t0 = time.perf_counter()
         try:
             with SessionLocal() as db:
                 db.execute(text("SELECT 1"))
+                pending = db.execute(
+                    text("SELECT COUNT(*) FROM approval_tasks WHERE task_status='pending'")
+                ).scalar()
             components["mysql"] = {"ok": True, "latency_ms": round((time.perf_counter() - t0) * 1000, 1)}
+            components["forms"] = {"ok": True, "pending": int(pending or 0)}
         except Exception as exc:  # noqa: BLE001 —— 健康面必须吞错降级
             components["mysql"] = {"ok": False, "error": str(exc)[:200]}
-
-        try:
-            resp = httpx.get(f"{settings.mock_base_url}/health", timeout=3.0)
-            components["mock"] = {"ok": resp.status_code == 200}
-        except Exception as exc:  # noqa: BLE001
-            components["mock"] = {"ok": False, "error": str(exc)[:200]}
+            components.setdefault("forms", {"ok": False})
 
         if not settings.llm_base_url:
             components["llm"] = {"ok": None, "note": "not_configured"}
