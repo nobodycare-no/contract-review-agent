@@ -27,12 +27,16 @@ class RealHTTPTransport:
     def chat(self, messages: list[dict], tools: list[dict] | None = None,
              *, channel: str = "native") -> dict:
         settings = get_settings()
-        # 裸 httpx 直连：vLLM 扩展参数必须位于 JSON 顶层
-        # （OpenAI SDK 的 extra_body 包装对线上协议无效——此前思考因此未被关闭）
+        # 兼容性最强关闭思考的方式：/no_think 用户消息软开关（官方语义，
+        # 与服务端版本无关）；顶层 chat_template_kwargs 曾被部分版本忽略
+        messages = [dict(m) for m in messages]
+        for m in reversed(messages):
+            if m.get("role") == "user":
+                m["content"] = (m.get("content") or "") + "\n/no_think"
+                break
         payload: dict[str, Any] = {
             "model": settings.llm_model, "messages": messages,
             "temperature": 0.2, "max_tokens": 1500,
-            "chat_template_kwargs": {"enable_thinking": False},
         }
         if tools and channel == "native":
             payload["tools"] = tools
