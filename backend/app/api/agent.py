@@ -107,7 +107,6 @@ def _run_view(run) -> dict:
 @router.post("/run")
 def run(req: dict, db: Session = Depends(get_db)) -> dict:
     from app.services import fetcher
-    from app.services.agent_loop import RunController
     from app.services.tool_errors import ToolError
 
     instance_id = req.get("instance_id")
@@ -122,9 +121,9 @@ def run(req: dict, db: Session = Depends(get_db)) -> dict:
     if task is None:
         raise HTTPException(404, f"找不到任务: {req}")
 
-    controller = RunController(db, task, dry_run=bool(req.get("dry_run")))
-    try:
-        run = controller.start()
+    from app.services.engine import run_full_cycle
+    result = run_full_cycle(db, task, dry_run=bool(req.get("dry_run")))
+    run_view_extra=result
     except ToolError as exc:
         raise HTTPException(409, exc.code)
 
@@ -135,7 +134,6 @@ def run(req: dict, db: Session = Depends(get_db)) -> dict:
 
 @router.post("/runs/{run_id}/resume")
 def resume_run(run_id: int, db: Session = Depends(get_db)) -> dict:
-    from app.services.agent_loop import RunController
     from app.services.tool_errors import ToolError
 
     run = db.query(AgentRun).filter_by(id=run_id).one_or_none()

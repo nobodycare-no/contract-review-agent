@@ -174,15 +174,15 @@ def diag_llm() -> dict:
 def _run_batch(ids: list[int]) -> None:
     """批量送审工人：顺序执行，任何异常都被吞掉并在该任务的运行记录/状态中留痕。"""
     from app.db import SessionLocal
-    from app.services.agent_loop import RunController
-
+    
     for tid in ids:
         s = SessionLocal()
         try:
             task = s.query(ApprovalTask).filter_by(id=tid).one_or_none()
             if task is None:
                 continue
-            RunController(s, task).start()
+            from app.services.engine import run_full_cycle
+    run_full_cycle(s, task)
         except Exception:  # noqa: BLE001 —— 批量工人绝不向上抛
             continue
         finally:
