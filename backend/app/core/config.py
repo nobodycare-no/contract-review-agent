@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # ===== 轨迹录制（ADR-B9）：非空则录制到 tests/fixtures/trajectories/<名>.jsonl =====
     record_trajectory: str = ""
 
+    # ===== LLM 自由裁量审查层（ADR-B10）=====
+    ai_review_enabled: bool = True
+
     # 后台运行模式轮询间隔提示（供 Web/CLI 使用）
     run_poll_interval_ms: int = 1000
 

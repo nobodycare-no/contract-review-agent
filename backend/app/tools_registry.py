@@ -116,6 +116,9 @@ def execute_tool(ctx: RunContext, name: str, args: dict) -> str:
                 raise ToolError("PARSE_EMPTY", "请先解析合同", block_stage="parsing")
             rules = db.query(ReviewRule).filter(ReviewRule.rule_status == 1).all()
             summary = run_task_rules(db, task.id, rules, parse_row.raw_text)
+            from app.services.ai_reviewer import augment
+
+            summary = augment(summary, parse_row.raw_text)   # ADR-B10 增量风险层
             ctx.rules_summary = summary
             result = {"overall_risk_level": summary["overall_risk_level"],
                       "hits": summary["hits"], "focus_points": summary["focus_points"]}

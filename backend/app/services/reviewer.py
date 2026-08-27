@@ -65,7 +65,8 @@ def build_comment_text(summary: dict, parse_row: ContractParse | None) -> str:
     if summary["hits"]:
         lines.append("一、命中规则列表")
         for i, h in enumerate(summary["hits"], 1):
-            lines.append(f"{i}. [{h['risk_level']}] {h['rule_name']}——"
+            source = "[AI自由裁量]" if h.get("rule_code") == "AI_DISCRETIONARY" else "[规则]"
+            lines.append(f"{i}. {source}({h['risk_level']}) {h['rule_name']}——"
                          f"证据：{h['evidence_text'][:80]}"
                          f"（位置:{h['evidence_position'] or '全文'}）")
         lines.append("")
