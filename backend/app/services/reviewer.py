@@ -100,8 +100,14 @@ def validate_comment(text: str) -> None:
 def save_result(db: Session, task: ApprovalTask, *, overall_risk_level: str,
                 summary_text: str, focus_points_json: list,
                 comment_text: str) -> ReviewResult:
+    """G7 护栏：净化+长度约束；缺『总风险等级』行时自动补齐而非拒收（零步数损耗，
+    格式契约对下游永远成立；空文本仍回落模板）。"""
     comment_text = sanitize_comment(comment_text)
-    validate_comment(comment_text)
+    if "总风险等级" not in comment_text:
+        label = {"high": "高", "medium": "中", "low": "低"}.get(
+            overall_risk_level, "中")
+        comment_text = f"【AI合同审查】总风险等级：{label}\n{comment_text}"
+        comment_text = sanitize_comment(comment_text)
     row = ReviewResult(task_id=task.id, overall_risk_level=overall_risk_level,
                        summary_text=summary_text,
                        focus_points_json=focus_points_json,

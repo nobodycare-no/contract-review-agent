@@ -27,10 +27,12 @@ class RealHTTPTransport:
     def chat(self, messages: list[dict], tools: list[dict] | None = None,
              *, channel: str = "native") -> dict:
         settings = get_settings()
+        # 裸 httpx 直连：vLLM 扩展参数必须位于 JSON 顶层
+        # （OpenAI SDK 的 extra_body 包装对线上协议无效——此前思考因此未被关闭）
         payload: dict[str, Any] = {
             "model": settings.llm_model, "messages": messages,
             "temperature": 0.2, "max_tokens": 1500,
-            "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         if tools and channel == "native":
             payload["tools"] = tools

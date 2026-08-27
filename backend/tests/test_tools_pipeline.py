@@ -163,11 +163,15 @@ class TestBlockedAndRetry:
 
 
 class TestGuards:
-    def test_comment_without_risk_level_rejected(self, client: TestClient, fake_mock) -> None:
+    def test_comment_missing_marker_auto_completed(self, client: TestClient, fake_mock) -> None:
+        """G7 自动补齐语义：缺『总风险等级』行时护栏自动加标准行，
+        模型首次产出欠规范零步数损耗；格式契约对下游恒成立。"""
         _post(client, "/tools/list_pending", {})
         tasks = client.get("/agent/tasks").json()["tasks"]
         buy = next(t for t in tasks if t["approval_code"] == "AP-X-001")
-        bad = _post(client, "/tools/save_result", {
+        saved = _post(client, "/tools/save_result", {
             "case_id": buy["id"], "overall_risk_level": "low",
-            "summary_text": "s", "focus_points_json": [], "comment_text": "看起来没问题"})
-        assert bad["ok"] is False and bad["error"]["code"] == "VALIDATION_ERROR"
+            "summary_text": "s", "focus_points_json": [],
+            "comment_text": "整体尚可，建议留意交付节点。"})
+        assert saved["ok"] is True
+        assert saved["data"]["comment_text"].startswith("【AI合同审查】总风险等级：低")

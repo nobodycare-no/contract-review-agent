@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import re
 import time
 
 from sqlalchemy.orm import Session
@@ -25,6 +26,8 @@ from app.tools_registry import (RunContext, build_system_prompt,
 logger = get_logger("runcontroller")
 
 _CHANNEL_FALLBACK = {"native": "json", "json": "deterministic"}
+
+_THINK_RE = re.compile(r"<think>.*?</think>", re.S)
 
 
 def _new_transport():
@@ -114,7 +117,9 @@ class RunController:
                 if steps_used >= s.agent_max_steps:
                     self.fallback_kind = self.fallback_kind or "budget_steps"
                     break
-                if prompt_tokens + completion_tokens >= s.agent_token_budget:
+                # token 预算只计"生成侧"消耗——prompt 累积是对话循环的固有成本，
+                # 不属于模型挥霍；完成侧上限才是可控变量（SDD §7.4）
+                if completion_tokens >= s.agent_token_budget:
                     self.fallback_kind = self.fallback_kind or "budget_tokens"
                     break
                 if time.monotonic() >= wall_deadline:
@@ -128,6 +133,10 @@ class RunController:
                 completion_tokens += int(usage.get("completion_tokens") or 0)
                 steps_used += 1
 
+                # 防御性剥离残留思考块（服务端未关 thinking 时保证 JSON 协议与快照干净）
+                raw_content = message.get("content")
+                if raw_content:
+                    message["content"] = _THINK_RE.sub("", raw_content).strip()
                 tool_calls = message.get("tool_calls") or []
                 content = message.get("content") or ""
                 executed_write = False
