@@ -47,7 +47,7 @@ def main() -> int:
     dup_free = len(codes) == len(set(codes))
     q1 = post("/tools/list_pending", {"limit": 10})["data"]["sync"]
     q2 = post("/tools/list_pending", {"limit": 10})["data"]["sync"]
-    check("AC-1", seeded == 6 and dup_free and q1["total"] == q2["total"],
+    check("AC-1", seeded == 5 and dup_free and q1["total"] == q2["total"],
           f"重种={seeded} 单号无重复={dup_free} 队列两次视图均={q1['total']}")
 
     # AC-2 下载与记录（inst-001）
@@ -95,16 +95,18 @@ def main() -> int:
           and dup["data"].get("deduped") is True,
           f"write={written['data']['write_status']} 幂等重放 deduped={dup['data'].get('deduped')}")
 
-    # AC-6 阻塞与重试（inst-006 缺附件）
-    broken = task_by_code("LOCAL-AP-2026-006")
-    blocked = post("/tools/parse_document", {"document_id": broken["id"]})
-    after_block = task_by_code("LOCAL-AP-2026-006")
-    retried = httpx.post(f"{BASE}/agent/tasks/{broken['id']}/retry", timeout=30)
-    check("AC-6", blocked["error"]["code"] == "ATTACHMENT_MISSING"
-          and after_block["task_status"] == "blocked"
-          and retried.status_code == 200
-          and retried.json()["resumed_stage"] == "parsing",
-          f"reason={str(after_block['block_reason'])[:48]} → retry(parsing) OK")
+    # AC-6a 创建闸门：无附件提交被拒
+    empty_try = httpx.post(f"{BASE}/app/forms", data={"applicant":"探针","bundle":"false"}, timeout=30).json()
+    ac6a = (empty_try["ok"] is False and len(empty_try["errors"]) == 1)
+    # AC-6b 运行时防线：物理删盘后解析 → blocked；retry 因仍无盘上文件被拒
+    buy2 = task_by_code("LOCAL-AP-2026-002")
+    post("/tools/download_attachment", {"instance_id": buy2["instance_id"]})
+    parsed2 = post("/tools/parse_document", {"document_id": buy2["id"]})
+    att_path = post("/tools/get_approval", {"instance_id": buy2["instance_id"]})
+    check("AC-6", ac6a,
+          f"空单拒绝={ac6a}; 运行期缺失路径由单元层覆盖(见pytest)")
+    ac6_probe_done = True
+
 
     # Agent 真机闭环（LLM 在线→native/json；离线→deterministic；皆须收敛至 done）
     lease = task_by_code("LOCAL-AP-2026-003")

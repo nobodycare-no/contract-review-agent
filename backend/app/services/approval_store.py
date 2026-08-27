@@ -135,11 +135,14 @@ def post_comment(instance_id: str, comment_text: str) -> dict:
 def create_form(*, title: str, applicant: str, sources: list[tuple[str, bytes]],
                 apply_time: str | None = None,
                 approval_code: str | None = None,
-                instance_id: str | None = None) -> ApprovalTask:
+                instance_id: str | None = None,
+                allow_empty: bool = False) -> ApprovalTask:
     """前台/批量入口：创建审批单并落附件文件（status=pending）。"""
     import datetime as _dt
 
     s = get_settings()
+    if not sources and not allow_empty:
+        raise ToolError("VALIDATION_ERROR", "审批单必须至少上传一份合同文件")
     stamp = f"{_dt.datetime.now():%Y%m%d}"
     size_tag = sum(len(b) for b in sources) % 9973
     with _db() as db:
@@ -214,7 +217,6 @@ def reset_demo() -> dict:
              [("数据处理协议.md", asset_dir / "数据处理协议.md")]),
             ("LOCAL-AP-2026-005", "供应商盖章页扫描件补录", "王铁柱",
              [("盖章页扫描件.png", asset_dir / "盖章页扫描件.png")]),
-            ("LOCAL-AP-2026-006", "市场推广物料印刷合同（附件遗失）", "李梅", []),
         ]
         for code, title, applicant, files in profiles:
             sources = [(f.name, f.read_bytes()) for _, f in files]

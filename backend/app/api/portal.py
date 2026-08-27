@@ -81,6 +81,8 @@ async def create_forms(
     except Exception as exc:  # noqa: BLE001 —— 编号冲突等收敛为错误行
         errors.append({"file": title or "-", "reason": str(exc)[:160]})
 
+    if not created and not errors:
+        errors.append({"file": "-", "reason": "审批单必须至少上传一份合同文件"})
     return {"ok": bool(created),
             "created": created, "errors": errors}
 

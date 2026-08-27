@@ -39,6 +39,14 @@ class TestCreateForms:
         assert body["ok"] is False
         assert ".exe" in body["errors"][0]["reason"]
 
+    def test_no_files_rejected_at_creation_gate(self, client: TestClient) -> None:
+        """空审批单必须在创建层被拒——不存在"合法的无附件审批单"。"""
+        r = client.post("/app/forms",
+                        data={"applicant": "张三", "title": "没有文件的单", "bundle": "false"})
+        body = r.json()
+        assert body["ok"] is False
+        assert any("至少上传一份合同文件" in e["reason"] for e in body["errors"])
+
 
 class TestBatchReview:
     def test_batch_runs_to_done_with_risk_levels(

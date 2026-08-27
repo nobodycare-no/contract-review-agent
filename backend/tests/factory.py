@@ -27,9 +27,16 @@ def docx_bytes() -> bytes:
 def make_form(db_session, *, code: str = "AP-Z-001", title: str = "采购合同审批",
               applicant: str = "王铁柱", files: int = 1):
     """经真实 create_form 建审批单（附件落盘 UPLOAD_DIR）；files=0 模拟缺附件单。"""
+    if files == 0:
+        """运行时防线测试专用：模拟绕过创建闸门的历史脏数据(零附件)。"""
+        from app.models import ApprovalTask
+
+        t = ApprovalTask(approval_code=code, approval_title=title,
+                         applicant_name=applicant, instance_id=f"LOCAL-{code}")
+        db_session.add(t); db_session.commit(); return t
     from app.services.approval_store import create_form
 
-    sources = [(f"合同.docx", docx_bytes())] * files
+    sources = [("合同.docx", docx_bytes())] * files
     return create_form(title=title, applicant=applicant,
                        sources=sources, approval_code=code,
                        instance_id=f"LOCAL-{code}")
