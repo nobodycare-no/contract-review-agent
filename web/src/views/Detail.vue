@@ -34,7 +34,8 @@
     <section class="card"><h3>状态</h3><div class="kv"><b>任务</b><span>{{ STATUS[d.task.task_status] }}</span>
       <b>意见写入</b><span>{{ WRITE[d.task.write_status] }}</span>
       <template v-if="d.task.block_reason"><b>阻塞原因</b><span style="color:var(--hi)">{{ d.task.block_reason }}</span>
-        <b></b><button @click="doRetry">重新处理此单</button></template></div></section>
+        <b></b><button @click="doRetry">重新处理此单</button>
+        <span class="err" style="font-size:12px">{{ retryHint }}</span></template></div></section>
 
     <section class="card"><h3>审查留痕（写入记录时间线）</h3>
       <div v-if="!d.comment_logs.length" style="color:var(--dim);font-size:13px">
@@ -60,6 +61,7 @@ const hits=computed(()=>d.value?.hits?.filter(h=>h.hit_status==='hit')||[])
 const ruleHits=computed(()=>hits.value.filter(h=>h.rule_code!=='AI_DISCRETIONARY'))
 const aiHits=computed(()=>hits.value.filter(h=>h.rule_code==='AI_DISCRETIONARY'))
 async function load(){d.value=await api.detail(route.params.id)}
-async function doRetry(){await api.retry(route.params.id);load()}
+let retryHint=ref('')
+async function doRetry(){const r=await api.retry(route.params.id).catch(e=>({resumed_stage:'FAIL',detail:e.message}));if(r.resumed_stage){retryHint.value='';load()}else{retryHint.value=r.detail||'无法重试——请先补传附件';}}
 load()
 </script>

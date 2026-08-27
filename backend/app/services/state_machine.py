@@ -52,7 +52,12 @@ def block_task(db: Session, task: ApprovalTask, code: str, message: str) -> None
 
 
 def retry_task(db: Session, task: ApprovalTask) -> str:
-    """人工重试：按 block_stage 回溯 parsing 或 reviewing。"""
+    """人工重试：缺附件的单子拒绝空转（不假装开工），其余按 block_stage 回溯。"""
+    from app.models import ApprovalAttachment
+
+    if not db.query(ApprovalAttachment).filter_by(task_id=task.id).count():
+        raise ToolError("NO_ATTACHMENTS",
+                        "该审批单没有任何合同文件——请先在此审批单中补传附件，再重新处理")
     reason = task.block_reason or ""
     stage = "reviewing" if reason.startswith("WRITE_FAILED") else "parsing"
     if not transition(db, task, stage):
