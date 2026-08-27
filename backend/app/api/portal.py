@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, \
     UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
