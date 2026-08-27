@@ -28,6 +28,13 @@
       <b>意见写入</b><span>{{ WRITE[d.task.write_status] }}</span>
       <template v-if="d.task.block_reason"><b>阻塞原因</b><span style="color:var(--hi)">{{ d.task.block_reason }}</span>
         <b></b><button @click="doRetry">重新处理此单</button></template></div></section>
+
+    <section class="card"><h3>审查留痕（写入记录时间线）</h3>
+      <div v-if="!d.comment_logs.length" style="color:var(--dim);font-size:13px">
+        尚无写入动作。上方「审查意见全文」即未写入时的最终文案。</div>
+      <div v-for="(c,i) in d.comment_logs" :key="i" style="margin-bottom:6px;font-size:13px">
+        {{ i+1 }}. <b>{{ WRITE[c.write_status]||c.write_status }}</b>
+        <span v-if="c.response" style="color:var(--dim)">· {{ c.response }}</span></div></section>
   </div>
 </template>
 
