@@ -5,7 +5,14 @@
       <span v-if="d.review" style="font-size:18px;font-weight:700">
         综合风险：{{ LEVEL[d.review.overall_risk_level]||d.review.overall_risk_level }}</span></div>
 
-    <section class="card"><h3>合同基本信息</h3><div class="kv">
+    <section class="card"><h3>原始合同文件</h3>
+     <div class="kv"><template v-for="a in d.attachments||[]" :key="a.attachment_id">
+       <b>{{ a.file_name }}</b>
+       <span>{{ a.download_status==='done' ? '' : '缺失' }}
+         <a v-if="a.download_status==='done'" style="color:var(--ac);cursor:pointer;margin-left:8px"
+            :href="`/app/files/${d.task.id}/${a.attachment_id}`" target="_blank">查看原件 ↗</a></span></template>
+       <b v-if="!(d.attachments||[]).length">-</b><span v-if="!(d.attachments||[]).length" style="color:var(--dim)">无附件</span></div></section>
+   <section class="card"><h3>合同基本信息</h3><div class="kv">
       <template v-for="(v,k) in d.parse?.basic_info||{}" :key="k">
         <b>{{ ZH[k]||k }}</b><span>{{ v.value ?? '—' }}<i v-if="v.status==='inferred'">（推断）</i></span>
       </template></div></section>

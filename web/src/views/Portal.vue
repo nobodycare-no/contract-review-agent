@@ -23,8 +23,6 @@
         <option value="blocked">需人工处理</option>
         <option value="done">已完成</option>
       </select>
-      <button @click="pullFromExternal">同步外部待办（可选）</button>
-      <label><input type="checkbox" v-model="dry"/> 仅演练，不写入</label>
       <button class="primary" :disabled="!selectedIds.length || running"
               @click="batchStart()">开始批量自动审查（{{ selectedIds.length }}）</button>
       <span class="msg">{{ msg }}</span>
@@ -81,7 +79,6 @@ async function submit(){
   uploading.value=false;
 }
 
-async function pullFromExternal(){await api.pullForms();loadQueue()}
 
 async function batchStart(){
   running.value=true; msg.value='批次已在后台排队，列表将实时推进…'

@@ -105,6 +105,36 @@ def queue(status: str | None = Query(None), limit: int = Query(50, le=200),
                        .group_by(ApprovalTask.task_status).all())}
 
 
+@router.get("/files/{task_id}/{attachment_id}")
+def view_file(task_id: int, attachment_id: str,
+              db: Session = Depends(get_db)):
+    """原始合同文件查看（浏览器内联打开；新窗口另存即为下载）。"""
+    from fastapi import HTTPException
+    from pathlib import Path as _P
+
+    from app.models import ApprovalAttachment
+
+    row = (db.query(ApprovalAttachment)
+           .filter_by(task_id=task_id, attachment_id=attachment_id).one_or_none())
+    if row is None or not (row.file_path and _P(row.file_path).is_file()):
+        raise HTTPException(404, "附件不存在")
+    mime = {"docx": ("application/vnd.openxmlformats-officedocument."
+                     "wordprocessingml.document", False),
+            "pdf": ("application/pdf", True),
+            "md": ("text/markdown; charset=utf-8", True),
+            "txt": ("text/plain; charset=utf-8", True),
+            "png": ("image/png", True), "jpg": ("image/jpeg", True),
+            "jpeg": ("image/jpeg", True)}.get(row.file_type.lower(),
+                                              ("application/octet-stream", False))
+    from urllib.parse import quote
+
+    fname = quote(row.file_name)
+    headers = {"Content-Disposition":
+               f"inline; filename*=UTF-8''{fname}" if mime[1]
+               else f"attachment; filename*=UTF-8''{fname}"}
+    return FileResponse(row.file_path, media_type=mime[0], headers=headers)
+
+
 @router.get("/diag_llm")
 def diag_llm() -> dict:
     """发一次最小真实推理请求并原样回报：给用户看得懂的 GPU 链路证据。"""
