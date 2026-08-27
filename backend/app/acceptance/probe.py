@@ -36,16 +36,19 @@ def task_by_code(code: str) -> dict:
 def main() -> int:
     # 健康面
     health = get("/health")
-    check("HEALTH", set(health["components"]) == {"mysql", "mock", "llm"},
+    check("HEALTH", set(health["components"]) == {"mysql", "forms", "llm"},
           f"status={health['status']} mysql={health['components']['mysql']['ok']} "
           f"forms={health['components'].get('forms',{}).get('ok')} llm={health['components']['llm'].get('ok')}")
 
-    # AC-1 拉取与去重
-    post("/admin/reset-demo", token=TOKEN)
-    first = post("/tools/list_pending", {"limit": 10})["data"]["sync"]
-    second = post("/tools/list_pending", {"limit": 10})["data"]["sync"]
-    check("AC-1", first["created"] >= 5 and second["created"] == 0,
-          f"首次新建={first['created']} 二次新建={second['created']}")
+    # AC-1 队列幂等与唯一编号（统一系统语义：任务创建即落库，拉取为只读视图）
+    reset = post("/admin/reset-demo", token=TOKEN)
+    seeded = len(reset.get("seeded") or [])
+    codes = [t["approval_code"] for t in get("/agent/tasks")["tasks"]]
+    dup_free = len(codes) == len(set(codes))
+    q1 = post("/tools/list_pending", {"limit": 10})["data"]["sync"]
+    q2 = post("/tools/list_pending", {"limit": 10})["data"]["sync"]
+    check("AC-1", seeded == 6 and dup_free and q1["total"] == q2["total"],
+          f"重种={seeded} 单号无重复={dup_free} 队列两次视图均={q1['total']}")
 
     # AC-2 下载与记录（inst-001）
     buy = task_by_code("LOCAL-AP-2026-001")
