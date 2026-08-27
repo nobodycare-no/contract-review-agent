@@ -182,7 +182,8 @@ def _run_batch(ids: list[int]) -> None:
             if task is None:
                 continue
             from app.services.engine import run_full_cycle
-    run_full_cycle(s, task)
+
+            run_full_cycle(s, task)
         except Exception:  # noqa: BLE001 —— 批量工人绝不向上抛
             continue
         finally:
