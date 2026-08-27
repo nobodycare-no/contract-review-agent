@@ -129,7 +129,7 @@ def post_comment(instance_id: str, comment_text: str) -> dict:
             raise ToolError("WRITE_FAILED", f"审批单不存在: {instance_id}",
                             block_stage="reviewing")
         prior = (db.query(ApprovalAttachment).filter_by(task_id=t.id).count(), )
-    return {"write_status": "success", "comment_id": 0, "prior_attachments": prior[0]}
+    return {"write_status": "success"}
 
 
 def create_form(*, title: str, applicant: str, sources: list[tuple[str, bytes]],

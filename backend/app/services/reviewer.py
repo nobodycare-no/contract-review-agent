@@ -1,4 +1,4 @@
-﻿"""解析与审查编排服务（FR-B/FR-D）：解析管线、评论生成、结果保存、幂等回写。"""
+"""解析与审查编排服务（FR-B/FR-D）：解析管线、评论生成、结果保存、幂等回写。"""
 from __future__ import annotations
 
 import re
@@ -135,8 +135,9 @@ def write_comment(db: Session, task: ApprovalTask, review: ReviewResult) -> dict
     try:
         resp = approval_store.post_comment(task.instance_id, review.comment_text)
         fresh.write_status = "success"
+        n_chars = len(review.comment_text)
         db.add(CommentLog(task_id=task.id, write_status="success",
-                          write_response_text=str(resp)[:500]))
+                          write_response_text=f"意见 #{review.id} 已写入审批单评论区（{n_chars} 字）"))
         db.commit()
         transition(db, fresh, "done")
         TOOL_CALLS.labels(tool="write_comment", outcome="success").inc()

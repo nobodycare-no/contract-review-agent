@@ -41,8 +41,8 @@
       <div v-if="!d.comment_logs.length" style="color:var(--dim);font-size:13px">
         尚无写入动作。上方「审查意见全文」即未写入时的最终文案。</div>
       <div v-for="(c,i) in d.comment_logs" :key="i" style="margin-bottom:6px;font-size:13px">
-        {{ i+1 }}. <b>{{ WRITE[c.write_status]||c.write_status }}</b>
-        <span v-if="c.response" style="color:var(--dim)">· {{ c.response }}</span></div></section>
+        <b>{{ c.created_at }}</b> · {{ c.response || (WRITE[c.write_status]||c.write_status) }}</div>
+      <div v-if="!d.comment_logs.length" style="color:var(--dim);font-size:13px">尚无写入记录</div></section>
   </div>
 </template>
 

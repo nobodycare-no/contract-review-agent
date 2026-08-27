@@ -68,7 +68,7 @@ def task_detail(task_id: int, db: Session = Depends(get_db)) -> dict:
             "focus_points": review.focus_points_json,
             "comment_text": review.comment_text},
         "comment_logs": [{"write_status": c.write_status,
-                          "response": c.write_response_text} for c in comments],
+                          "created_at": str(c.created_at)[:19]} for c in comments if c.write_status != "writing"],
     }
 
 
