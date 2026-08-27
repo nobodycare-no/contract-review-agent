@@ -20,8 +20,17 @@ _LLM_PROBE_TTL_S = 30.0
 def create_app() -> FastAPI:
     settings = get_settings()
     setup_logging()
-    app = FastAPI(title="contract-review-agent", version="1.2.0")
+    app = FastAPI(title="contract-review-agent", version="1.3.0")
     app.state.llm_probe_cache: dict = {"ts": 0.0, "ok": None}  # type: ignore[attr-defined]
+
+    # 启动自愈：清理曾因维护/重启而卡死在中间态的任务（用户可见为"需人工处理"）
+    try:
+        from app.services.state_machine import recover_interrupted
+
+        with SessionLocal() as _db0:
+            healed = recover_interrupted(_db0)
+    except Exception:  # noqa: BLE001 —— 表未建好等测试场景静默
+        healed = 0
 
     from app.api.agent import router as agent_router
     from app.api.admin import router as admin_router

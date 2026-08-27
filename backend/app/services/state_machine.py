@@ -58,3 +58,25 @@ def retry_task(db: Session, task: ApprovalTask) -> str:
     if not transition(db, task, stage):
         raise ToolError("INVALID_STATE", f"当前状态 {task.task_status} 不允许重试")
     return stage
+
+
+def recover_interrupted(db: Session) -> int:
+    """启动自愈：进程曾中断导致卡在 parsing/reviewing 的孤儿任务 → blocked（人话原因）。"""
+    from app.models import AgentRun
+
+    running_ids = {r.task_id for r in db.query(AgentRun)
+                   .filter_by(status="running").all()}
+    fixed = 0
+    for t in (db.query(ApprovalTask)
+              .filter(ApprovalTask.task_status.in_(["parsing", "reviewing"]))
+              .all()):
+        if t.id in running_ids:
+            continue
+        ok = transition(db, t, "blocked",
+                        block_reason="系统维护中断，处理未完成——请点击重新处理")
+        if ok:
+            fixed += 1
+            db.add(TaskLog(task_id=t.id, log_level="warn", log_type="agent",
+                           log_content="startup recovery: interrupted -> blocked"))
+    db.commit()
+    return fixed
