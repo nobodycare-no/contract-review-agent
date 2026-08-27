@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua
 
 COPY backend/app ./app
 COPY --from=webbuilder /web/dist ./web/dist
+COPY deploy/demo_contracts /srv/demo_contracts
 RUN mkdir -p /srv/storage/attachments
 
 EXPOSE 8000

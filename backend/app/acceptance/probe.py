@@ -38,7 +38,7 @@ def main() -> int:
     health = get("/health")
     check("HEALTH", set(health["components"]) == {"mysql", "mock", "llm"},
           f"status={health['status']} mysql={health['components']['mysql']['ok']} "
-          f"mock={health['components']['mock']['ok']} llm={health['components']['llm'].get('ok')}")
+          f"forms={health['components'].get('forms',{}).get('ok')} llm={health['components']['llm'].get('ok')}")
 
     # AC-1 拉取与去重
     post("/admin/reset-demo", token=TOKEN)
@@ -48,7 +48,7 @@ def main() -> int:
           f"首次新建={first['created']} 二次新建={second['created']}")
 
     # AC-2 下载与记录（inst-001）
-    buy = task_by_code("AP-2026-001")
+    buy = task_by_code("LOCAL-AP-2026-001")
     dl = post("/tools/download_attachment", {"instance_id": buy["instance_id"]})
     atts = dl["data"]["attachments"]
     check("AC-2", atts and all(a["download_status"] == "done" for a in atts),
@@ -61,7 +61,7 @@ def main() -> int:
           f"amount_value={amount}")
 
     # AC-3b OCR 扫描件（inst-005 PNG → tesseract chi_sim）
-    scan = task_by_code("AP-2026-005")
+    scan = task_by_code("LOCAL-AP-2026-005")
     post("/tools/download_attachment", {"instance_id": scan["instance_id"]})
     ocr = post("/tools/parse_document", {"document_id": scan["id"]})
     no = ocr["data"]["basic_info"]["contract_no"]["value"]
@@ -86,16 +86,16 @@ def main() -> int:
     dup = post("/tools/write_comment",
                {"instance_id": buy["instance_id"],
                 "review_id": saved["data"]["review_id"]})
-    done_task = task_by_code("AP-2026-001")
+    done_task = task_by_code("LOCAL-AP-2026-001")
     check("AC-5", written["data"]["write_status"] == "success"
           and done_task["task_status"] == "done"
           and dup["data"].get("deduped") is True,
           f"write={written['data']['write_status']} 幂等重放 deduped={dup['data'].get('deduped')}")
 
     # AC-6 阻塞与重试（inst-006 缺附件）
-    broken = task_by_code("AP-2026-006")
+    broken = task_by_code("LOCAL-AP-2026-006")
     blocked = post("/tools/parse_document", {"document_id": broken["id"]})
-    after_block = task_by_code("AP-2026-006")
+    after_block = task_by_code("LOCAL-AP-2026-006")
     retried = httpx.post(f"{BASE}/agent/tasks/{broken['id']}/retry", timeout=30)
     check("AC-6", blocked["error"]["code"] == "ATTACHMENT_MISSING"
           and after_block["task_status"] == "blocked"
@@ -104,9 +104,9 @@ def main() -> int:
           f"reason={str(after_block['block_reason'])[:48]} → retry(parsing) OK")
 
     # Agent 真机闭环（LLM 在线→native/json；离线→deterministic；皆须收敛至 done）
-    lease = task_by_code("AP-2026-003")
+    lease = task_by_code("LOCAL-AP-2026-003")
     run = post("/agent/run", {"instance_id": lease["instance_id"]})
-    lease_after = task_by_code("AP-2026-003")
+    lease_after = task_by_code("LOCAL-AP-2026-003")
     check("AGENT-RUN", run["channel"] in ("native", "json", "deterministic")
           and run["status"] == "succeeded"
           and lease_after["task_status"] == "done",

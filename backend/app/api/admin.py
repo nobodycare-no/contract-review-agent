@@ -1,4 +1,4 @@
-﻿"""管理面（X-Admin-Token 常量时比较）：规则启停 / 演示重置 / 日志别名。"""
+"""管理面（X-Admin-Token 常量时比较）：规则启停 / 演示重置 / 日志别名。"""
 from __future__ import annotations
 
 import hmac
@@ -44,16 +44,8 @@ def update_rule(rule_code: str, payload: dict, db: Session = Depends(get_db)) ->
 
 @router.post("/reset-demo", dependencies=[Depends(require_admin)])
 def reset_demo(db: Session = Depends(get_db)) -> dict:
-    """mock 注册表复位 + app 业务库清空——完整演示复现点。"""
-    from app.models import AgentRun, ApprovalAttachment, ApprovalTask, \
-        CommentLog, ContractParse, ReviewResult, RuleHit, TaskLog
-
+    """复位为演示数据集：approval_store 内部完成 清空→重种 六张本地审批单。"""
     try:
-        approval_store.reset_demo()
+        return approval_store.reset_demo()
     except ToolError as exc:
         raise HTTPException(502, str(exc))
-    for model in (AgentRun, CommentLog, ReviewResult, RuleHit, ContractParse,
-                  ApprovalAttachment, TaskLog, ApprovalTask):
-        db.query(model).delete()
-    db.commit()
-    return {"reset": True}

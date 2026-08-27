@@ -188,8 +188,13 @@ def reset_demo() -> dict:
     from app.models import AgentRun, CommentLog, ContractParse, ReviewResult, \
         RuleHit, TaskLog
 
-    repo_root = Path(__file__).resolve().parents[3]
-    asset_dir = repo_root / "deploy" / "demo_contracts"
+    candidates = [Path("/srv/demo_contracts"),                       # 容器布局
+                  Path(__file__).resolve().parents[3] / "deploy" / "demo_contracts",  # 本地仓库
+                  Path(__file__).resolve().parents[1] / "deploy" / "demo_contracts"]
+    asset_dir = next((c for c in candidates if c.is_dir()), None)
+    if asset_dir is None:
+        raise ToolError("VALIDATION_ERROR",
+                        f"演示资产目录缺失: tried {[str(c) for c in candidates]}")
 
     with _db() as db:
         for model in (AgentRun, CommentLog, ReviewResult, RuleHit, ContractParse,

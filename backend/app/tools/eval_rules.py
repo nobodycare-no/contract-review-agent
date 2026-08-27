@@ -18,18 +18,18 @@ ALL_RULES = {"PAY_ADVANCE_HIGH", "PAY_CYCLE_LONG", "AUTO_RENEW", "NO_BREACH",
 
 # 标注矩阵：人工判定每份合同的预期命中/禁止误报/总评
 EXPECTED: dict[str, dict] = {
-    "AP-2026-001": {  # 高风险采购：预付50%/无违约/管辖甲方/缺验收/缺保密/缺知产
+    "LOCAL-AP-2026-001": {  # 高风险采购：预付50%/无违约/管辖甲方/缺验收/缺保密/缺知产
         "expected": {"PAY_ADVANCE_HIGH", "PAY_CYCLE_LONG", "NO_BREACH",
                      "JURISDICTION_RISK", "NDA_MISSING", "IP_MISSING",
                      "ACCEPTANCE_MISSING"},
         "overall": "high"},
-    "AP-2026-002": {  # 中风险外包：自动续约/缺知产；其余条款齐全
+    "LOCAL-AP-2026-002": {  # 中风险外包：自动续约/缺知产；其余条款齐全
         "expected": {"AUTO_RENEW", "IP_MISSING"},
         "overall": "medium"},
-    "AP-2026-003": {  # 低风险租赁：条款完备零命中
+    "LOCAL-AP-2026-003": {  # 低风险租赁：条款完备零命中
         "expected": set(),
         "overall": "low"},
-    "AP-2026-004": {  # 中风险数据协议：数据处理提示/缺保密/缺知产
+    "LOCAL-AP-2026-004": {  # 中风险数据协议：数据处理提示/缺保密/缺知产
         "expected": {"DATA_COMPLIANCE", "NDA_MISSING", "IP_MISSING"},
         "overall": "medium"},
 }
