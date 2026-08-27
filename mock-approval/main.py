@@ -59,6 +59,12 @@ def write_comment(instance_id: str, payload: dict):
     return {"code": 0, "data": result}
 
 
+@app.get("/mock/approvals/{instance_id}/comments")
+def list_comments_route(instance_id: str):
+    """查看该审批单评论区内容（演示：核对 AI 写回的意见原文）。"""
+    return {"code": 0, "data": store.list_comments(instance_id)}
+
+
 @app.post("/mock/reset")
 def reset():
     store.reset()
