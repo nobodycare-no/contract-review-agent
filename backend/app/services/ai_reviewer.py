@@ -37,7 +37,7 @@ def chat_points(text: str, existing_codes: set[str], transport=None) -> list[dic
         raise LLMUnavailable("ai_review disabled or llm not configured")
     prompt = render("ai_review",
                     existing="、".join(sorted(existing_codes)) or "无",
-                    text=text[:12000])
+                    text=text[:6000])   # 防御服务端 max-model-len 上限（中文 token 密度高）
     message = target.chat(
         [{"role": "system", "content": "你是企业资深法务审查专家，输出严格遵循约定 JSON 格式。"},
          {"role": "user", "content": prompt}], None, channel="json")
