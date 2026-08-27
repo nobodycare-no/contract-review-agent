@@ -86,6 +86,7 @@
 <script>
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const $=id=>document.getElementById(id);
+const msg=t=>{$('msg').textContent=t};
 const STATUS={pending:'待处理',parsing:'正在解析',reviewing:'正在审查',blocked:'需人工处理',done:'已完成'};
 const WRITE ={not_written:'尚未生成',writing:'写入中…',success:'已写入审批单评论区',failed:'写入失败'};
 const LEVEL ={high:'高风险',medium:'中风险',low:'低风险'};
