@@ -72,11 +72,11 @@ def create_app() -> FastAPI:
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     # Web 工作台静态挂载（T7）：路由优先于挂载，/ 前缀不遮蔽 API
-    web_dist = Path(__file__).resolve().parents[2] / "web" / "dist"
-    if web_dist.exists():
+    static_dir = Path(__file__).resolve().parent / "static"
+    if static_dir.exists():
         from fastapi.staticfiles import StaticFiles
 
-        app.mount("/", StaticFiles(directory=str(web_dist), html=True), name="web")
+        app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="web")
 
     return app
 

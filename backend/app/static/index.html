@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>合同审批审查 Agent · 工作台</title>
+<style>
+  :root{--bg:#0f1420;--panel:#171e2e;--line:#26304a;--tx:#dbe4ff;--dim:#8493b8;
+        --hi:#ff5d6c;--md:#ffb454;--lo:#3fd68f;--ac:#5b8cff}
+  *{box-sizing:border-box;margin:0;padding:0;font-family:"Microsoft YaHei",system-ui,sans-serif}
+  body{background:var(--bg);color:var(--tx);padding:18px 22px}
+  h1{font-size:20px;margin-bottom:4px}
+  .sub{color:var(--dim);font-size:12px;margin-bottom:14px}
+  .bar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+  .tag{font-size:11px;padding:2px 10px;border-radius:10px;border:1px solid var(--line)}
+  .ok{color:var(--lo)} .bad{color:var(--hi)} .na{color:var(--dim)}
+  button{background:var(--panel);border:1px solid var(--line);color:var(--tx);
+         padding:7px 14px;border-radius:8px;cursor:pointer;font-size:13px}
+  button:hover{border-color:var(--ac)}
+  button.primary{background:var(--ac);border-color:var(--ac);color:#fff}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border-radius:10px;overflow:hidden;font-size:13px}
+  th,td{padding:9px 12px;border-bottom:1px solid var(--line);text-align:left}
+  th{color:var(--dim);font-weight:500;font-size:12px}
+  tr.click{cursor:pointer} tr.click:hover{background:#1b2438}
+  .st{padding:1px 8px;border-radius:9px;font-size:11px}
+  .pending,.not_written{background:#33415e;color:#cbd6f2}
+  .parsing{background:#2b4a6f;color:#9ecbff}
+  .reviewing{background:#6b5518;color:#ffd97a}
+  .blocked{background:#5a2430;color:#ff98a4}
+  .done,.success{background:#17453a;color:#69e6ae}
+  .failed{background:#5a2430;color:#ff98a4}
+  pre{white-space:pre-wrap;background:var(--panel);border:1px solid var(--line);
+      border-radius:10px;padding:14px;font-size:13px;line-height:1.7}
+  .grid{display:flex;flex-direction:column;gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .card h3{font-size:14px;color:var(--ac);margin-bottom:8px}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;font-size:13px}
+  .kv b{color:var(--dim);font-weight:400}
+  .hit{border-left:3px solid var(--lo);padding:6px 10px;margin-bottom:6px;background:#10182a;border-radius:0 8px 8px 0;font-size:13px}
+  .hit.high{border-color:var(--hi)} .hit.medium{border-color:var(--md)}
+  .hidden{display:none}
+  #metrics{max-height:60vh;overflow:auto;font-size:12px;font-family:Consolas,monospace}
+</style>
+</head>
+<body>
+<h1>合同审批审查 Agent · 工作台</h1>
+<div class="sub">七工具闭环 · RunController 可观测 · 数据与评论全留痕</div>
+
+<div class="bar">
+  <button onclick="syncTasks()">同步待办</button>
+  <button class="primary" onclick="runAgent()">▶ 运行 inst-001 闭环</button>
+  <label style="font-size:13px;display:flex;align-items:center;gap:4px">
+    <input type="checkbox" id="dry"> dry-run 演练</label>
+  <span id="runStat"></span>
+  <span style="flex:1"></span>
+  <button onclick="show('tasks')">任务</button>
+  <button onclick="show('metricsView')">指标</button>
+  <span id="healthTag" class="tag na">健康检测中…</span>
+</div>
+
+<div id="tasks">
+  <table><thead><tr><th>ID</th><th>审批编号</th><th>标题</th><th>申请人</th>
+    <th>任务状态</th><th>回写状态</th></tr></thead>
+  <tbody id="taskRows"></tbody></table>
+</div>
+
+<div id="detail" class="grid hidden"></div>
+
+<div id="metricsView" class="hidden">
+  <div class="bar"><button onclick="loadMetrics()">刷新指标</button></div>
+  <pre id="metrics">—</pre>
+</div>
+
+<script>
+const esc = s => String(s ?? '').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const $ = id => document.getElementById(id);
+
+async function health(){
+  try{
+    const c=(await (await fetch('/health')).json()).components;
+    const f=(ok,label)=>ok===null||ok===undefined?`<span class="na">${label}?</span>`
+      :ok?`<span class="ok">${label}✓</span>`:`<span class="bad">${label}✗</span>`;
+    $('healthTag').innerHTML=f(c.mysql?.ok,'MySQL')+' '+f(c.mock?.ok,'Mock')+' '+f(c.llm?.ok,'LLM');
+  }catch{$('healthTag').textContent='后端不可达';}
+}
+
+async function loadTasks(){
+  const ts=(await (await fetch('/agent/tasks')).json()).tasks;
+  $('taskRows').innerHTML=ts.map(t=>`
+    <tr class="click" onclick="openDetail(${t.id})">
+      <td>${t.id}</td><td>${esc(t.approval_code)}</td><td>${esc(t.title)}</td>
+      <td>${esc(t.applicant)}</td>
+      <td><span class="st ${t.task_status}">${t.task_status}</span></td>
+      <td><span class="st ${t.write_status}">${t.write_status}</span></td>
+    </tr>`).join('')||'<tr><td colspan=6>暂无任务，点击「同步待办」</td></tr>';
+}
+
+async function syncTasks(){
+  const r=await (await fetch('/tools/list_pending',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:'{"limit":20}'})).json();
+  $('runStat').textContent=`同步完成 新建${r.data.sync.created}`;
+  loadTasks();
+}
+
+async function runAgent(){
+  $('runStat').textContent='运行中…（同步执行）';
+  const dry=$('dry').checked?'&dry_run=true':'';
+  const r=await fetch(`/agent/run?x=1`,{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({instance_id:'inst-001',dry_run:$('dry').checked})});
+  const j=await r.json();
+  const S=j.fallback_kind?(' · 降级='+j.fallback_kind):'';
+  $('runStat').textContent=
+    `run#${j.run_id} ${j.status} ch=${j.channel} 步数=${j.steps_used}${S}`;
+  if(j.trace) console.table(j.trace);
+  loadTasks(); health();
+}
+
+function kv(obj){return Object.entries(obj||{}).map(([k,v])=>{
+  const val=typeof v==='object'?JSON.stringify(v):v;
+  return `<b>${esc(k)}</b><span>${esc(val)}</span>`}).join('');}
+
+async function openDetail(id){
+  show('detail');
+  const d=await (await fetch('/agent/tasks/'+id)).json();
+  const t=d.task, p=d.parse;
+  const hits=d.hits.filter(h=>h.hit_status==='hit').map(h=>`
+    <div class="hit ${h.risk_level}"><b>[${esc(h.risk_level)}] ${esc(h.rule_name)}</b>
+      ${h.evidence?'<div style="color:var(--dim)">证据：'+esc(h.evidence)+'</div>':''}</div>`).join('')
+    ||'<i>无命中</i>';
+  $('detail').innerHTML=`
+   <div class="card"><h3>${esc(t.approval_code)} · ${esc(t.title)}</h3>
+     <div class="kv"><b>实例ID</b><span>${esc(t.instance_id)}</span>
+       <b>申请人</b><span>${esc(t.applicant)}</span>
+       <b>任务状态</b><span><span class="st ${t.task_status}">${t.task_status}</span></span>
+       <b>回写状态</b><span><span class="st ${t.write_status}">${t.write_status}</span></span>
+       ${t.block_reason?`<b>阻塞原因</b><span style="color:var(--hi)">${esc(t.block_reason)}</span>`:''}
+       ${d.review?`<b>总风险等级</b><span style="color:var(--md)">${esc(d.review.overall_risk_level)}</span>`:''}</div>
+     ${t.block_reason?`<br><button onclick="retry(${id},event)">重试该任务</button>`:''}</div>
+   <div class="card"><h3>附件</h3><div class="kv">${kv(Object.fromEntries(
+     d.attachments.map(a=>[a.file_name,a.download_status])))||'<b>-</b><span>无</span>'}</div></div>
+   ${p&&p.basic_info?`<div class="card"><h3>解析字段</h3><div class="kv">${kv(
+     Object.fromEntries(Object.entries(p.basic_info).map(([k,v])=>[k,v.value??'缺失'])))}</div></div>`:''}
+   <div class="card"><h3>规则命中</h3>${hits}</div>
+   ${d.review?`<div class="card"><h3>审查意见（已生成）</h3><pre>${esc(d.review.comment_text)}</pre></div>`:''}
+   <div class="card"><h3>回写日志</h3><div class="kv">${kv(Object.fromEntries(
+     d.comment_logs.map((c,i)=>['#'+(i+1),c.write_status+' '+(c.response||'')])))||'<b>-</b><span>无</span>'}</div></div>`;
+}
+
+async function retry(id,e){
+  e.stopPropagation();
+  await fetch(`/agent/tasks/${id}/retry`,{method:'POST'});
+  openDetail(id);
+}
+
+function show(v){
+  ['tasks','detail','metricsView'].forEach(x=>$(x).classList.toggle('hidden',x!==v));
+  if(v==='tasks')loadTasks();
+  if(v==='metricsView')loadMetrics();
+}
+
+async function loadMetrics(){
+  const t=await (await fetch('/metrics')).text();
+  $('metrics').textContent=t.split('\n').filter(l=>l.startsWith('cra_')&&!l.startsWith('#')).join('\n');
+}
+
+health(); loadTasks(); setInterval(health,15000);
+</script>
+</body>
+</html>

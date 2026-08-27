@@ -37,13 +37,16 @@ def task_detail(task_id: int, db: Session = Depends(get_db)) -> dict:
     comments = db.query(CommentLog).filter_by(task_id=task_id)\
         .order_by(CommentLog.id).all()
 
+    from app.models import ReviewRule as _ReviewRule
+
+    rule_map = {r.id: (r.rule_code, r.rule_name, r.risk_level)
+                for r in db.query(_ReviewRule).all()}
+
     def hit_view(h: RuleHit):
-        rule = h.rule if hasattr(h, "rule") else None
-        name = getattr(rule, "rule_name", f"rule#{h.rule_id}")
-        level = getattr(rule, "risk_level", "")
-        return {"rule_id": h.rule_id, "rule_name": name, "risk_level": level,
-                "hit_status": h.hit_status, "evidence": h.evidence_text[:300],
-                "position": h.evidence_position}
+        code, name, level = rule_map.get(h.rule_id, ("", f"rule#{h.rule_id}", ""))
+        return {"rule_id": h.rule_id, "rule_code": code, "rule_name": name,
+                "risk_level": level, "hit_status": h.hit_status,
+                "evidence": h.evidence_text[:300], "position": h.evidence_position}
 
     return {
         "task": {"id": task.id, "approval_code": task.approval_code,
