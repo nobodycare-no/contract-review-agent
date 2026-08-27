@@ -1,16 +1,25 @@
+# ---- 阶段一：前端构建（Vue3/Vite）----
+FROM node:20-alpine AS webbuilder
+WORKDIR /web
+COPY web/package.json ./
+RUN npm config set registry https://registry.npmmirror.com && npm install
+COPY web/ ./
+RUN npm run build
+
+# ---- 阶段二：后端运行时（tesseract OCR / 托管前端构建产物）----
 FROM python:3.11-slim
 
 WORKDIR /srv
 
-# tesseract 中文 OCR（扫描件识别）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr tesseract-ocr-chi-sim libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-COPY app ./app
+COPY backend/app ./app
+COPY --from=webbuilder /web/dist ./web/dist
 RUN mkdir -p /srv/storage/attachments
 
 EXPOSE 8000

@@ -75,12 +75,15 @@ def create_app() -> FastAPI:
     def metrics() -> Response:
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
-    # Web 工作台静态挂载（T7）：路由优先于挂载，/ 前缀不遮蔽 API
-    static_dir = Path(__file__).resolve().parent / "static"
-    if static_dir.exists():
+    # Web 静态托管：优先 Vue 构建产物(dist)，回退轻量占位页(static)。API 路由不受遮蔽。
+    _candidates = [Path(__file__).resolve().parents[1] / "web" / "dist",   # 容器内 /srv/web/dist
+                   Path(__file__).resolve().parents[2] / "web" / "dist",   # 本地仓库布局
+                   Path(__file__).resolve().parent / "static"]             # 兜底
+    web_root = next((c for c in _candidates if c.exists()), None)
+    if web_root is not None:
         from fastapi.staticfiles import StaticFiles
 
-        app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="web")
+        app.mount("/", StaticFiles(directory=str(web_root), html=True), name="web")
 
     return app
 

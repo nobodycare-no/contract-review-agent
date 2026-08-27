@@ -20,27 +20,22 @@ services:
       retries: 30
     networks: [cranet]
 
-  mock-approval:
-    build: ../mock-approval
-    # 开发便利：回环映射便于宿主机 curl 直调；生产移除
-    ports:
-      - "127.0.0.1:18100:8100"
-    networks: [cranet]
-
   app:
-    build: ../backend
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
     env_file: ../.env
     environment:
       MYSQL_URL: "mysql+pymysql://cra:${DB_PASSWORD:-cra123456}@mysql:3306/contract_review?charset=utf8mb4"
       UPLOAD_DIR: "/srv/storage/attachments"
-      MOCK_BASE_URL: "http://mock-approval:8100"
     ports:
-      - "18000:8000"        # 工具/Agent/Mock 全部经此入口
+      - "18000:8000"        # 前台(/)+后台(/admin)+API 唯一入口
+    volumes:
+      - attachment_data:/srv/storage/attachments
     depends_on:
       mysql:
         condition: service_healthy
-      mock-approval:
-        condition: service_started
+    restart: unless-stopped
     networks: [cranet]
 
 networks:
@@ -49,3 +44,4 @@ networks:
 
 volumes:
   mysql_data:
+  attachment_data:
