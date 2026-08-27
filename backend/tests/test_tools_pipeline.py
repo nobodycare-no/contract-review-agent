@@ -113,7 +113,7 @@ class TestBlockedAndRetry:
 
         retried = client.post(f"/agent/tasks/{broken['id']}/retry")
         assert retried.status_code == 409
-        assert "NO_ATTACHMENTS" in retried.json().get("detail", "")
+        assert "补传附件" in retried.json().get("detail", "")
         detail2 = client.get(f"/agent/tasks/{broken['id']}").json()
         assert detail2["task"]["task_status"] == "blocked", \
             "缺附件单重试被拒后应保持 blocked 等待补件"
