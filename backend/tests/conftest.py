@@ -12,6 +12,7 @@ os.environ.setdefault("MYSQL_URL", f"sqlite:///{_tmpdir}/cra_test.sqlite3")
 os.environ.setdefault("LLM_BASE_URL", "")          # 未配置 LLM → health 报 not_configured
 os.environ.setdefault("ADMIN_TOKEN", "test-admin")
 os.environ.setdefault("UPLOAD_DIR", os.path.join(_tmpdir, "attachments"))
+os.environ.setdefault("AGENT_ENGINE", "legacy")   # 单测默认 legacy；LC 真机路径见联调脚本
 
 import pytest                                        # noqa: E402
 from fastapi.testclient import TestClient            # noqa: E402
