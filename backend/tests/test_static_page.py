@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 def test_index_served_and_api_unmasked(client: TestClient) -> None:
     resp = client.get("/")
     assert resp.status_code == 200
-    assert "合同审批审查 Agent" in resp.text
+    assert "合同智能审查助手" in resp.text
 
     health = client.get("/health")
     assert health.status_code == 200 and "components" in health.json()
