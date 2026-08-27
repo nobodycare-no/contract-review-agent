@@ -1,4 +1,4 @@
-﻿"""统一系统本地审批域网关（V1-S2 架构合并后唯一实现）。
+"""统一系统本地审批域网关（V1-S2 架构合并后唯一实现）。
 
 与原外部模拟客户端保持同形签名，调用方零语义漂移；底层改为本系统自有
 业务表(approval_tasks/approval_attachments)+附件磁盘目录。
@@ -140,13 +140,26 @@ def create_form(*, title: str, applicant: str, sources: list[tuple[str, bytes]],
     import datetime as _dt
 
     s = get_settings()
-    code = approval_code or (
-        f"AP-LOCAL-{_dt.datetime.now():%Y%m%d}-{abs(hash(title)) % 10000:04d}"
-        f"-{sum(len(b) for b in sources) % 9973:04d}")
+    stamp = f"{_dt.datetime.now():%Y%m%d}"
+    size_tag = sum(len(b) for b in sources) % 9973
     with _db() as db:
-        dup = db.query(ApprovalTask).filter_by(approval_code=code).one_or_none()
-        if dup is not None:
-            raise ToolError("VALIDATION_ERROR", f"审批编号重复: {code}")
+        if approval_code:
+            dup = db.query(ApprovalTask).filter_by(approval_code=approval_code) \
+                .one_or_none()
+            if dup is not None:
+                raise ToolError("VALIDATION_ERROR", f"审批编号重复: {approval_code}")
+            code = approval_code
+        else:
+            stem = abs(hash(f"{title}")) % 9000
+            base = f"AP-LOCAL-{stamp}-{stem:04d}-{size_tag:04d}"
+            code, attempt = base, 1
+            while db.query(ApprovalTask).filter_by(approval_code=code) \
+                    .one_or_none() is not None:
+                attempt += 1
+                if attempt > 8:
+                    code = f"{base}-{_dt.datetime.now().strftime('%H%M%S%f')[-6:]}"
+                    break
+                code = f"{base}-{attempt:02d}"
         inst = instance_id or f"LOCAL-{code}"
         task = ApprovalTask(approval_code=code, approval_title=title,
                             applicant_name=applicant, instance_id=inst)
