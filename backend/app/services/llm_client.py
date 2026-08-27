@@ -57,6 +57,10 @@ class ReplayTransport:
         self._items = [json.loads(line)["resp"]
                        for line in path.read_text(encoding="utf-8").splitlines()
                        if line.strip()]
+        # 防御：剔除历史污染的探测行(echo)
+        self._items = [i for i in self._items
+                       if not any(c.get("function", {}).get("name") == "echo"
+                                  for c in (i.get("tool_calls") or []))]
         self._cursor = 0
 
     def chat(self, messages, tools=None, *, channel="native") -> dict:
@@ -68,10 +72,11 @@ class ReplayTransport:
 
 
 class RecordingTransport:
-    """包裹真实传输，把逐轮响应落盘为可回放轨迹。"""
+    """包裹真实传输，把逐轮响应落盘为可回放轨迹。inner 暴露底层裸传输供探测旁路。"""
 
     def __init__(self, inner, case: str) -> None:
         self._inner = inner
+        self.inner = inner
         self._path = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / \
             "trajectories" / f"{case}.jsonl"
         self._path.parent.mkdir(parents=True, exist_ok=True)

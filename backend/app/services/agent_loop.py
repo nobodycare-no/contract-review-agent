@@ -221,7 +221,9 @@ class RunController:
             self.fallback_kind = self.fallback_kind or "llm_down"
             return "deterministic"
         try:
-            return "native" if llm_client.probe_native_tools(self.transport) else "json"
+            # 探测走底层裸传输（录制态下旁路 RecordingTransport，避免污染轨迹）
+            probe_target = getattr(self.transport, "inner", self.transport)
+            return "native" if llm_client.probe_native_tools(probe_target) else "json"
         except Exception:  # noqa: BLE001
             return "json"
 

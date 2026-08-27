@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
+from app.core.obs import log_event
 from app.models import ApprovalTask
 from app.services import fetcher, reviewer
 from app.services.rule_engine import run_task_rules
@@ -147,7 +148,18 @@ def execute_tool(ctx: RunContext, name: str, args: dict) -> str:
                 raise ToolError("VALIDATION_ERROR", "尚无已保存的审查结果")
             from app.models import ReviewResult
 
-            review = db.query(ReviewResult).filter_by(id=review_id).one()
+            review = db.query(ReviewResult).filter_by(id=review_id).one_or_none()
+            if review is None and ctx.review_id:
+                # 韧性对齐：引用不存在的历史 id（如录制轨迹/跨库迁移）时，
+                # 回退到本运行最近一次成功保存的结果——"写最新结论"的意图不变
+                from app.core.obs import get_logger as _gl
+
+                log_event(_gl("tools"), 30, "review_id aligned to latest",
+                          err=str(review_id))
+                review_id = ctx.review_id
+                review = db.query(ReviewResult).filter_by(id=review_id).one()
+            elif review is None:
+                raise ToolError("VALIDATION_ERROR", f"审查结果不存在: {review_id}")
             outcome = reviewer.write_comment(db, task, review)
             ctx.written = outcome.get("write_status") == "success"
             result = {"write_status": outcome.get("write_status"),

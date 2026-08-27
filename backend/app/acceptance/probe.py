@@ -103,15 +103,15 @@ def main() -> int:
           and retried.json()["resumed_stage"] == "parsing",
           f"reason={str(after_block['block_reason'])[:48]} → retry(parsing) OK")
 
-    # Agent 确定性通道闭环（LLM 未接入时的 ADR-B5/B7 形态）
+    # Agent 真机闭环（LLM 在线→native/json；离线→deterministic；皆须收敛至 done）
     lease = task_by_code("AP-2026-003")
     run = post("/agent/run", {"instance_id": lease["instance_id"]})
     lease_after = task_by_code("AP-2026-003")
-    check("AGENT-DET", run["channel"] == "deterministic"
+    check("AGENT-RUN", run["channel"] in ("native", "json", "deterministic")
           and run["status"] == "succeeded"
           and lease_after["task_status"] == "done",
-          f"fallback={run['fallback_kind']} steps={run['steps_used']} "
-          f"trace={len(run['trace'])}步")
+          f"channel={run['channel']} fallback={run['fallback_kind']} "
+          f"steps={run['steps_used']} trace={len(run['trace'])}步")
 
     # metrics 暴露
     text = httpx.get(f"{BASE}/metrics", timeout=15).text

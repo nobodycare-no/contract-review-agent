@@ -1,0 +1,36 @@
+﻿[93m合同审批审查 Agent · 闭环演示[0m
+
+[94m═══ 阶段 1 · 重置 mock 审批系统 ═══[0m
+{'reset': True}
+
+[94m═══ 阶段 2 · 拉取待办并去重 ═══[0m
+待办 6 条：新建 6，更新 0
+
+[94m═══ 阶段 3 · Agent 闭环执行 inst-001（高风险采购合同） ═══[0m
+run #10 通道=native 状态=succeeded 步数=6 tokens≈14252 降级=None 耗时=114231ms
+   1. get_contract_approval        [92mok[0m
+   2. download_contract_attachment [92mok[0m
+   3. parse_contract_document      [92mok[0m
+   4. run_contract_rules           [92mok[0m
+   5. save_review_result           [91mVALIDATION_ERROR[0m
+   6. write_approval_comment       [91mVALIDATION_ERROR[0m
+   7. save_review_result           [92mok[0m
+   8. write_approval_comment       [92mok[0m
+
+[94m═══ 阶段 4 · 任务详情与审查结论 ═══[0m
+命中 7 条规则：
+  [high] 预付款比例过高
+  [medium] 付款周期过长
+  [high] 违约责任缺失
+  [medium] 管辖地不利
+  [medium] 保密条款缺失
+  [medium] 知识产权归属缺失
+  [high] 验收标准缺失
+
+总风险等级：HIGH
+总风险等级：高
+
+[94m═══ 阶段 5 · 回写状态 ═══[0m
+task_status=done write_status=success
+
+[92m演示通过 ✓[0m

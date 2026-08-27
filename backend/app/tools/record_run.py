@@ -24,8 +24,7 @@ def main() -> int:
     case = get_settings().record_trajectory or "unnamed_case"
 
     with SessionLocal() as db:
-        created, _ = fetcher.sync_pending_approvals(db)
-        seed_rules(db)
+        fetcher.sync_pending_approvals(db)
         task = db.query(ApprovalTask).filter_by(instance_id=instance_id).one_or_none()
         if task is None:
             logger.error("task not found", extra={"err": instance_id})
