@@ -105,6 +105,39 @@ def queue(status: str | None = Query(None), limit: int = Query(50, le=200),
                        .group_by(ApprovalTask.task_status).all())}
 
 
+@router.get("/diag_llm")
+def diag_llm() -> dict:
+    """发一次最小真实推理请求并原样回报：给用户看得懂的 GPU 链路证据。"""
+    import os
+    import httpx
+
+    base = os.environ.get("LLM_BASE_URL", "")
+    key = os.environ.get("LLM_API_KEY", "")
+    out = {"configured": bool(base), "url": base}
+    if not base:
+        return {**out, "reachable": False, "note": "未配置 LLM_BASE_URL"}
+    try:
+        r = httpx.post(f"{base.rstrip('/')}/chat/completions",
+                       headers={"Authorization": f"Bearer {key}"},
+                       json={"model": os.environ.get("LLM_MODEL", "qwen3-8b"),
+                             "messages": [{"role": "user",
+                                           "content": "只回复两个字：在线"}],
+                             "max_tokens": 8, "temperature": 0},
+                       timeout=30)
+        out.update(status=r.status_code)
+        try:
+            body = r.json()
+            msg = body["choices"][0]["message"]
+            out["reply"] = (msg.get("content") or "")[:50]
+            out["usage"] = body.get("usage")
+        except Exception:  # noqa: BLE001
+            out["body_head"] = r.text[:300]
+        return out
+    except Exception as exc:  # noqa: BLE001 —— 诊断必须返回失败细节而非抛错
+        return {**out, "status": None,
+                "error": f"{type(exc).__name__}: {exc}"[:300]}
+
+
 def _run_batch(ids: list[int]) -> None:
     """批量送审工人：顺序执行，任何异常都被吞掉并在该任务的运行记录/状态中留痕。"""
     from app.db import SessionLocal
