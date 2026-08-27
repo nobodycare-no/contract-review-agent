@@ -112,8 +112,11 @@ class TestBlockedAndRetry:
         assert "ATTACHMENT_MISSING" in detail["task"]["block_reason"]
 
         retried = client.post(f"/agent/tasks/{broken['id']}/retry")
-        assert retried.status_code == 200
-        assert retried.json()["resumed_stage"] == "parsing"
+        assert retried.status_code == 409
+        assert "NO_ATTACHMENTS" in retried.json().get("detail", "")
+        detail2 = client.get(f"/agent/tasks/{broken['id']}").json()
+        assert detail2["task"]["task_status"] == "blocked", \
+            "缺附件单重试被拒后应保持 blocked 等待补件"
 
 
 class TestGuards:
