@@ -38,14 +38,17 @@ def test_prompt_registry_versions_and_render() -> None:
     assert "{data}" in keep
 
 
-def test_seed_rules_inserts_eleven_and_idempotent(db_session: Session) -> None:
+def test_seed_rules_idempotent_with_ai_anchor(db_session: Session) -> None:
+    """12 行 = 11 条引擎规则 + AI_DISCRETIONARY 落库锚点(status=0 不参与匹配)。"""
     from app.models import ReviewRule
 
     created, updated = seed_rules(db_session)
-    assert created == 11 and updated == 0
+    assert created == 12 and updated == 0
     created2, updated2 = seed_rules(db_session)
     assert (created2, updated2) == (0, 0), "二次种子应完全幂等"
-    assert db_session.query(ReviewRule).count() == 11
+    total = db_session.query(ReviewRule).count()
+    active = db_session.query(ReviewRule).filter(ReviewRule.rule_status == 1).count()
+    assert total == 12 and active == 11
 
 
 def test_agent_run_row_roundtrip(db_session: Session) -> None:

@@ -62,4 +62,11 @@ SEED_RULES: list[dict] = [
         "match_mode": "absence", "match_text": "验收,检验标准",
         "suggestion_text": "缺少验收标准条款，付款节点将缺乏客观依据，建议补充。",
     },
+    {
+        # AI 自由裁量层的落库锚点：永不参与引擎匹配(status=0)，仅为命中行提供 rule_id
+        "rule_code": "AI_DISCRETIONARY", "rule_name": "[AI] 语义级增量风险", "risk_level": "low",
+        "match_mode": "keyword", "match_text": "__ai_layer_never_matches__",
+        "suggestion_text": "",
+        "rule_status": 0,
+    },
 ]

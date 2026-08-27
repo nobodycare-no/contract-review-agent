@@ -84,6 +84,37 @@ class TestAugment:
         assert summary == _base_summary()
 
 
+class TestPersistence:
+    def test_ai_points_persisted_as_rule_hits_and_rerun_clean(self, db_session: Session):
+        """落库契约：AI 点以 AI_DISCRETIONARY 锚点 rule_id 入 rule_hits；重跑不累积。"""
+        from app.models import ApprovalTask, ReviewRule, RuleHit
+
+        seed_rules(db_session)
+        task = ApprovalTask(approval_code="T-AI-P", approval_title="t",
+                            applicant_name="a", instance_id="inst-001")
+        db_session.add(task)
+        db_session.commit()
+
+        summary = augment(_base_summary(), RAW,
+                          task=task, db=db_session,
+                          transport=_fake_transport({
+                              "points": [{"severity": "high", "point": "无限连带责任",
+                                          "evidence_quote": "乙方承担全部责任",
+                                          "reason": "显失公平"}]}))
+        assert any(h["rule_code"] == AI_CODE for h in summary["hits"])
+
+        anchor = db_session.query(ReviewRule).filter_by(rule_code=AI_CODE).one()
+        rows = db_session.query(RuleHit).filter_by(task_id=task.id, rule_id=anchor.id).all()
+        assert len(rows) == 1 and rows[0].hit_status == "hit"
+        assert "无限连带责任" in rows[0].evidence_text
+
+        # 二次融合重跑：旧 AI 行先删后插，不累积
+        augment(summary, RAW, task=task, db=db_session,
+                transport=_fake_transport({"points": []}))
+        assert db_session.query(RuleHit).filter_by(
+            task_id=task.id, rule_id=anchor.id).count() == 0
+
+
 def _fake_transport(payload: dict):
     class T:
         def chat(self, messages, tools=None, *, channel="json"):

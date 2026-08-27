@@ -55,9 +55,12 @@ def create_app() -> FastAPI:
         else:
             cache = app.state.llm_probe_cache
             now = time.monotonic()
-            if now - cache["ts"] > _LLM_PROBE_TTL_S and cache["ok"] is not False or cache["ts"] == 0.0:
+            if now - cache["ts"] > _LLM_PROBE_TTL_S:   # 到期即重探，不做负缓存永锁
                 try:
-                    resp = httpx.get(f"{settings.llm_base_url.rstrip('/')}/models", timeout=3.0)
+                    resp = httpx.get(f"{settings.llm_base_url.rstrip('/')}/models",
+                                     headers={"Authorization":
+                                              f"Bearer {settings.llm_api_key}"},
+                                     timeout=8.0)
                     ok = resp.status_code == 200
                 except Exception:  # noqa: BLE001
                     ok = False

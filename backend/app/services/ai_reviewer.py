@@ -81,8 +81,9 @@ def parse_points(content: str) -> list[dict]:
     return cleaned
 
 
-def augment(summary: dict, text: str, transport=None) -> dict:
-    """把 AI 增量风险并入规则汇总；失败静默降级返回原 summary。"""
+def augment(summary: dict, text: str, *, task=None, db=None,
+            transport=None) -> dict:
+    """把 AI 增量风险并入规则汇总；可选持久化到 rule_hits；失败静默降级返回原 summary。"""
     if not text or len(text.strip()) < 50:
         return summary
     try:
@@ -92,6 +93,18 @@ def augment(summary: dict, text: str, transport=None) -> dict:
         log_event(logger, 30, "ai_review skipped", err=str(exc)[:160])
         return summary
     if not points:
+        # 空结果同样要清理旧 AI 行——重跑必须反映最新状态
+        if task is not None and db is not None:
+            try:
+                from app.models import ReviewRule, RuleHit
+
+                anchor = db.query(ReviewRule).filter_by(rule_code=AI_CODE).one_or_none()
+                if anchor is not None:
+                    db.query(RuleHit).filter_by(task_id=task.id,
+                                                rule_id=anchor.id).delete()
+                db.commit()
+            except Exception as exc:  # noqa: BLE001
+                log_event(logger, 30, "ai_review clear failed", err=str(exc)[:160])
         log_event(logger, 20, "ai_review empty")
         return summary
 
@@ -112,6 +125,36 @@ def augment(summary: dict, text: str, transport=None) -> dict:
                      overall_risk_level=overall,
                      overall_risk_label=_LABEL[overall],
                      focus_points=[h["suggestion_text"] for h in merged])
+
+    if task is not None and db is not None:
+        try:
+            _persist_points(db, task.id, merged)
+        except Exception as exc:  # noqa: BLE001 —— 持久化失败不影响闭环
+            log_event(logger, 30, "ai_review persist failed", err=str(exc)[:160])
+
     log_event(logger, 20, "ai_review merged",
               kind=f"points={len(points)},overall={overall}")
     return augmented
+
+
+def _persist_points(db, task_id: int, hits: list) -> None:
+    """把 AI 点写为 rule_hits（挂 AI_DISCRETIONARY 合成规则 id）；重跑先清旧行。"""
+    from app.models import ReviewRule, RuleHit
+
+    anchor = db.query(ReviewRule).filter_by(rule_code=AI_CODE).one_or_none()
+    if anchor is None:
+        from app.services.rule_seed import SEED_RULES
+
+        spec = next(r for r in SEED_RULES if r["rule_code"] == AI_CODE)
+        anchor = ReviewRule(**spec)
+        db.add(anchor)
+        db.flush()
+    db.query(RuleHit).filter_by(task_id=task_id, rule_id=anchor.id).delete()
+    for h in hits:
+        if h.get("rule_code") != AI_CODE:
+            continue
+        db.add(RuleHit(task_id=task_id, rule_id=anchor.id,
+                       evidence_text=(f"{h['rule_name']}｜{h['evidence_text']}")[:1000],
+                       evidence_position="ai",
+                       hit_status="hit"))
+    db.commit()
