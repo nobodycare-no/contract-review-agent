@@ -1,4 +1,4 @@
-﻿"""集中配置——全部来自环境变量。"""
+"""集中配置——全部来自环境变量。"""
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     llm_api_key: str = "sk-atguigu"
     llm_model: str = "qwen3-8b"
     llm_timeout_s: int = 120
+    mock_timeout_s: int = 15         # 单轮基准超时；llm_client 以 ×8 作为 AI 审查墙钟
 
 
     # OCR
