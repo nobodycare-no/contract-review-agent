@@ -35,8 +35,7 @@
         <th>综合风险</th><th>意见写入</th></tr></thead>
       <tbody>
         <tr v-for="t in filtered" :key="t.id">
-          <td><input type="checkbox" :value="t.id" v-model="selectedIds"
-                     :disabled="t.task_status==='done'"/></td>
+          <td><input type="checkbox" :value="t.id" v-model="selectedIds"/></td>
           <td><router-link :to="`/detail/${t.id}`" style="color:var(--ac)">{{ t.title }}</router-link></td>
           <td>{{ t.applicant }}</td>
           <td><span :class="'pill p-'+t.task_status">{{ statusZh(t.task_status) }}</span></td>
