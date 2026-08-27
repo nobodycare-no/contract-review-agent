@@ -122,13 +122,15 @@ def run(req: dict, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(404, f"找不到任务: {req}")
 
     from app.services.engine import run_full_cycle
-    result = run_full_cycle(db, task, dry_run=bool(req.get("dry_run")))
-    run_view_extra=result
+    from app.services.tool_errors import ToolError
+
+    try:
+        result = run_full_cycle(db, task, dry_run=bool(req.get("dry_run")))
     except ToolError as exc:
         raise HTTPException(409, exc.code)
 
-    view = _run_view(run)
-    view["trace"] = controller.ctx.trace
+    view = {"task_id": task.id, **result}
+    view["trace"] = []
     return view
 
 
