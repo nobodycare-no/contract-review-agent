@@ -94,9 +94,13 @@ def retry(task_id: int, db: Session = Depends(get_db)) -> dict:
     try:
         result = run_full_cycle(db, task, dry_run=False)
     except Exception as exc:  # noqa: BLE001 —— 重试崩溃必须显式落回 blocked
+        from app.services.run_trace import record_tool_trace
+        from app.services.state_machine import block_task
+
         db.rollback()
         block_task(db, task, "LLM_RUN_FAILED",
                    f"重试运行失败已安全停机：{exc}"[:300])
+        record_tool_trace(db, task, getattr(exc, "trace", None))
         raise HTTPException(502, f"重试失败，任务已转回「需人工处理」：{str(exc)[:200]}") from exc
 
     record_tool_trace(db, task, result.get("trace"))
@@ -165,6 +169,10 @@ def run(req: dict, db: Session = Depends(get_db)) -> dict:
 
             db.rollback()   # 工具层可能留下损坏事务——先复位再落 blocked
             block_task(db, task, "LLM_RUN_FAILED", f"运行失败已安全停机：{exc}"[:300])
+            # 失败轨迹也留痕（闸门异常携带 .trace）——根因可诊断，而非只剩人话尾巴
+            from app.services.run_trace import record_tool_trace
+
+            record_tool_trace(db, task, getattr(exc, "trace", None))
             raise HTTPException(502, f"本次运行失败，任务已转入「需人工处理」：{str(exc)[:200]}") from exc
     finally:
         engine_module.release(task.id)

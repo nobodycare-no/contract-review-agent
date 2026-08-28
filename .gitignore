@@ -25,3 +25,6 @@ Thumbs.db
 node_modules/
 web/dist/
 .pytest_tmp/
+
+# Ì½ÕëÁÙÊ±Êä³ö
+probe_out.txt

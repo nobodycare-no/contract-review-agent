@@ -35,9 +35,8 @@ class RealHTTPTransport:
             # 思考型云端模型的推理 token 计入完成预算——余量给足，JSON 不许被截断
             "max_tokens": 3000,
         }
-        if settings.llm_thinking:
-            # 显式思考开关（BigModel thinking 参数）；空=不干预模型缺省行为
-            payload["thinking"] = {"type": settings.llm_thinking}
+        # 注意：这里绝不带 thinking 参数——glm-5.3-flash 在无 tools 请求上
+        # 对 {"type":"low"} 直接 400（实证）；思考档位只在 Agent 主线生效
         if tools and channel == "native":
             payload["tools"] = tools
         try:

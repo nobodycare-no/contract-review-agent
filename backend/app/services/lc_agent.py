@@ -49,6 +49,14 @@ SYSTEM_PROMPT = (
 def _chat_model():
     from langchain_openai import ChatOpenAI
 
+    extra = {}
+    thinking = os.environ.get("LLM_THINKING", "")
+    if thinking:
+        # 思考档位透传（glm-5.3-flash：low/high/max）——默认重思考实测≈19s/轮，
+        # low 档显著降轮耗时；空=不干预模型缺省行为。
+        # 必须走 extra_body：openai SDK v1 下 model_kwargs 会被当成
+        # create() 关键字参数直接 TypeError（真机 502 实证）
+        extra["extra_body"] = {"thinking": {"type": thinking}}
     return ChatOpenAI(
         model=os.environ.get("LLM_MODEL", "glm-5.3-flash"),
         api_key=os.environ.get("LLM_API_KEY", ""),
@@ -56,6 +64,7 @@ def _chat_model():
         temperature=0.2,
         max_retries=2,      # 同端点重试≠兜底：重试耗尽照样异常上抛
         timeout=int(os.environ.get("LLM_TIMEOUT_S", "120")),
+        **extra,
     )
 
 
@@ -127,10 +136,15 @@ def _lc_tools(ctx):
 
 
 def _run_tool(ctx, name: str, args: dict) -> str:
-    """统一包络执行一个工具；trace 由 execute_tool 包络层统一记账（单一事实源）。"""
+    """统一包络执行一个工具；trace 由 execute_tool 包络层统一记账（单一事实源）。
+
+    GLM 会并行发多个工具调用（LangGraph 多线程跑）——共享 Session 绝不能并发，
+    一律过 ctx.serial_lock 串行化（真机 'provisioning a new connection' 崩跑实证）。
+    """
     from app.tools_registry import execute_tool
 
-    return execute_tool(ctx, name, args or {})[:2000]
+    with ctx.serial_lock:
+        return execute_tool(ctx, name, args or {})[:2000]
 
 
 def _final_text(messages: list) -> str:
@@ -208,7 +222,10 @@ def run_lc(db_session: Session, task: ApprovalTask, *, dry_run: bool = False) ->
     if not closed:
         tail = " → ".join(f"{i['tool']}({i['outcome']})" for i in ctx.trace[-5:]) \
                or "（一次工具都没调用）"
-        raise RuntimeError(f"AI 未完成审查闭环（{missing}）——轨迹尾部: {tail}")
+        err = RuntimeError(f"AI 未完成审查闭环（{missing}）——轨迹尾部: {tail}")
+        # 完整轨迹随异常上抛：失败也必须可诊断——只有人话尾巴等于让首个真实异常匿名
+        err.trace = list(ctx.trace)
+        raise err
 
     return {"status": "succeeded", "steps": len(messages),
             "raw_output": _final_text(messages)[:600],

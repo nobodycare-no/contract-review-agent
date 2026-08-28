@@ -73,17 +73,19 @@ def test_review_payload_no_qwen_soft_switch(monkeypatch):
     assert payload["max_tokens"] >= 3000
 
 
-def test_review_payload_thinking_passthrough(monkeypatch):
-    """glm-5.3-flash 不支持关闭思考（API 400），档位=low/high/max——透传必须保形。"""
+def test_review_payload_omits_thinking_param(monkeypatch):
+    """实证：glm-5.3-flash 无 tools 时 thinking={"type":"low"} 直接 400
+    （该档位仅在带 tools 的 Agent 主线验证有效）——审查层一律不带思考参数，
+    默认思考 + max_tokens 3000 预算即可保证 JSON 完整。"""
     from app.services.llm_client import RealHTTPTransport
 
-    for level in ("low", "high", "max"):
-        class _Level(_StubSettings):
-            llm_thinking = level
+    class _ThinkingLow(_StubSettings):
+        llm_thinking = "low"
 
-        captured = _capture_post(monkeypatch, _Level)
-        RealHTTPTransport().chat([{"role": "user", "content": "x"}], None)
-        assert captured["payload"]["thinking"] == {"type": level}
+    captured = _capture_post(monkeypatch, _ThinkingLow)
+    RealHTTPTransport().chat([{"role": "user", "content": "x"}], None)
+    assert "thinking" not in captured["payload"]
+    assert "reasoning_effort" not in captured["payload"]
 
 
 def test_diag_llm_budget_survives_thinking_model(client, monkeypatch):
@@ -141,3 +143,21 @@ def test_chat_model_default_model_is_glm(monkeypatch):
     from app.services.lc_agent import _chat_model
 
     assert _chat_model().model_name == "glm-5.3-flash"
+
+
+def test_chat_model_applies_thinking_level(monkeypatch):
+    """真机证据：glm-5.3-flash 默认重思考≈19s/轮——思考档位必须同时作用于 Agent 主线。
+    openai SDK v1 下额外顶层请求体键必须走 extra_body（model_kwargs 会被当成
+    create() 关键字参数直接 TypeError，真机 502 实证）。"""
+    monkeypatch.setenv("LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_THINKING", "low")
+
+    from app.services.lc_agent import _chat_model
+
+    m = _chat_model()
+    assert m.extra_body == {"thinking": {"type": "low"}}
+    assert not m.model_kwargs  # 防回归：绝不能再走 model_kwargs 通道
+
+    monkeypatch.setenv("LLM_THINKING", "")
+    assert not _chat_model().extra_body

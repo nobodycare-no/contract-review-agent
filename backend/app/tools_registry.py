@@ -6,6 +6,7 @@ Agent 循环、确定性通道、CLI 三方共用同一 dispatch——单一事�
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -70,6 +71,10 @@ class RunContext:
     review_id: int | None = None
     written: bool = False
     trace: list[dict] = field(default_factory=list)
+    # GLM 真机实证：模型并行发多个工具调用，LangGraph ToolNode 多线程执行，
+    # 共享 Session 并发使用即 'provisioning a new connection' 崩跑——
+    # 同一运行的全部工具调用必须过这把锁串行化
+    serial_lock: "object" = field(default_factory=threading.Lock)
 
 
 def _clip(payload: Any) -> str:
@@ -271,6 +276,9 @@ def execute_tool(ctx: RunContext, name: str, args: dict) -> str:
         return _clip({"error_code": exc.code, "message": str(exc),
                       "retriable": exc.retriable})
     except Exception as exc:  # noqa: BLE001 —— 工具异常回填自纠，不终止循环
+        # 会话可能已被 flush 失败毒化（PendingRollbackError 会传染后续所有工具，
+        # GLM 真机 Doom-loop 教训）——先回滚复位，再回填真实原因给模型自纠
+        db.rollback()
         # 轨迹必须带原因：只记 EXC 等于让故障永远匿名（真机 2026-08-28 教训）
         ctx.trace.append({"tool": name, "outcome": f"EXC:{str(exc)[:120]}"})
         return _clip({"error_code": "TOOL_EXCEPTION", "message": str(exc)[:300]})

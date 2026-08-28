@@ -20,6 +20,105 @@ def _break_llm(monkeypatch, message="LLM 连接失败(ECONNREFUSED)"):
     monkeypatch.setattr(lc_module, "run_lc", boom)
 
 
+def test_tool_exception_rolls_back_poisoned_session(db_session):
+    """GLM 真机 Doom-loop 根因：一次 flush 失败后包络不回滚，会话毒化，
+    后续所有工具连续 PendingRollbackError，8 分钟长跑毁于一旦。
+    包络必须在异常时先 rollback 再回填自纠——会话恢复可用才算修复。"""
+    from app.models import ApprovalTask
+    from app.tools_registry import RunContext, execute_tool
+    from tests.factory import make_form
+
+    task = make_form(db_session)
+    ctx = RunContext(db=db_session, task=task, dry_run=True)
+
+    # 制造毒化事务：必填列缺失 → flush 失败（SQLite/MySQL 引擎无关）
+    db_session.add(ApprovalTask(approval_code=None, approval_title=None,
+                                instance_id=None))
+    with pytest.raises(Exception):
+        db_session.flush()
+
+    out = execute_tool(ctx, "list_review_rules", {})
+
+    # 关键断言：异常收敛后，同一会话必须恢复可用——下一条查询正常执行
+    assert db_session.query(ApprovalTask).filter_by(id=task.id).first() is not None
+    assert "TOOL_EXCEPTION" in out    # 模型仍拿到真实错误自纠，而非裸异常
+
+
+def test_parallel_tool_calls_serialized_on_shared_session(db_session, monkeypatch):
+    """GLM 真机根因（完整 traceback 实证）：glm-5.3-flash 一条消息并行发多个
+    工具调用，LangGraph ToolNode 多线程执行——共享 Session 并发使用即
+    'provisioning a new connection' 当场崩跑（BigModel 忽略 parallel_tool_calls:
+    false，200 但仍并行，实证）。包络必须按 ctx 串行化。"""
+    import threading
+    import time
+
+    from app.tools_registry import RunContext
+    from tests.factory import make_form
+
+    task = make_form(db_session)
+    ctx = RunContext(db=db_session, task=task, dry_run=True)
+
+    active, max_active = 0, 0
+
+    def spy_execute_tool(c, name, args):
+        nonlocal active, max_active
+
+        active += 1
+        max_active = max(max_active, active)
+        time.sleep(0.01)
+        active -= 1
+        return "ok"
+
+    import app.tools_registry as tr
+
+    monkeypatch.setattr(tr, "execute_tool", spy_execute_tool)
+
+    import app.services.lc_agent as lc_agents_mod
+
+    workers = [threading.Thread(target=lc_agents_mod._run_tool,
+                                args=(ctx, "list_review_rules", {}))
+               for _ in range(8)]
+    for t in workers:
+        t.start()
+    for t in workers:
+        t.join()
+
+    assert max_active == 1, \
+        f"工具包络未串行化：峰值并发 {max_active}——共享 Session 必崩"
+
+
+def test_run_lc_gate_failure_carries_trace(db_session, monkeypatch):
+    """闭环闸门失败必须携带完整轨迹——真机教训：blocked 人话只有尾巴 5 条，
+    首个真实异常永远匿名落不了库，根因诊断只能靠猜。"""
+    from tests.factory import make_form
+
+    task = make_form(db_session)
+    monkeypatch.setenv("AGENT_ENGINE", "langchain")
+    monkeypatch.setenv("LLM_BASE_URL", "http://127.0.0.1:9/v1")
+
+    def fake_create_agent(model, tools, system_prompt=None, **kw):
+        tmap = {t.name: t for t in tools}
+
+        class _FakeAgent:
+            def invoke(self, inp, config=None):
+                # 只留痕不闭环：模拟模型调了工具但最终没写回
+                tmap["get_contract_approval"].invoke({})
+                return {"messages": [*inp["messages"], {"content": "我完成了"}]}
+
+        return _FakeAgent()
+
+    import langchain.agents as lc_agents
+    monkeypatch.setattr(lc_agents, "create_agent", fake_create_agent)
+
+    from app.services.lc_agent import run_lc
+
+    with pytest.raises(RuntimeError) as ei:
+        run_lc(db_session, task, dry_run=True)
+    assert isinstance(getattr(ei.value, "trace", None), list), \
+        "闸门异常必须带 .trace（完整轨迹），否则首个真实异常无法落库"
+    assert any(t["tool"] == "get_contract_approval" for t in ei.value.trace)
+
+
 def test_batch_failure_blocks_task_with_human_reason(client, db_session, monkeypatch):
     from tests.factory import make_form
 

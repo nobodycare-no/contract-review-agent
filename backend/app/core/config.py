@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_api_key: str = ""            # 密钥不进代码：缺失时 API 401 显式失败
     llm_model: str = "glm-5.3-flash"
-    llm_thinking: str = ""           # 空=不干预；glm-5.3-flash 档位 low/high/max
-                                     # （真机证据：该模型不支持关闭思考，disabled 会 400）
+    llm_thinking: str = ""           # 思考档位，仅作用于 Agent 主线（low/high/max）；
+                                     # 审查层不带该参数（无 tools 请求 {"type":"low"} 实证 400）
     llm_timeout_s: int = 120
     mock_timeout_s: int = 15         # 单轮基准超时；llm_client 以 ×8 作为 AI 审查墙钟
 

@@ -23,7 +23,7 @@ def check(ac: str, cond: bool, evidence: str) -> None:
 
 def post(path, payload=None, token=None):
     headers = {"X-Admin-Token": TOKEN} if token else {}
-    r = httpx.post(f"{BASE}{path}", json=payload or {}, headers=headers, timeout=300)
+    r = httpx.post(f"{BASE}{path}", json=payload or {}, headers=headers, timeout=900)
     return r.json()
 
 
