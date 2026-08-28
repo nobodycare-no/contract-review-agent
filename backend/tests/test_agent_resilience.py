@@ -3,8 +3,11 @@
 1. 批量/单发运行崩溃 → 任务必须显式转入 blocked（人话原因），绝不留孤儿
 2. 规则库降格为 AI 的参考工具（新增 list_review_rules / search_contract_text）
 3. save_review_result 拒绝确定性文案兜底——意见必须 AI 亲笔
+4. 图跑完≠闭环：未写回就返回 succeeded 是假成功；自愈原因只许陈述事实
 """
 from __future__ import annotations
+
+import pytest
 
 import app.services.lc_agent as lc_module
 
@@ -189,6 +192,46 @@ def test_run_endpoint_reopens_blocked_before_engine(client, db_session, monkeypa
 
     assert resp.status_code == 200, resp.text
     assert seen["status_seen"] == "parsing"
+
+
+def test_run_lc_requires_closed_loop(db_session, monkeypatch):
+    """图跑完≠闭环。没保存审查结果/没写回意见就返回 succeeded = 假成功，必须掀桌。"""
+    from tests.factory import make_form
+
+    task = make_form(db_session)
+    monkeypatch.setenv("AGENT_ENGINE", "langchain")
+    monkeypatch.setenv("LLM_BASE_URL", "http://127.0.0.1:9/v1")   # 不会被真调
+
+    class _FakeAgent:
+        def invoke(self, *a, **k):
+            return {"messages": [{"content": "我尽力了，但工具老报错，先到这吧。"}]}
+
+    import langchain.agents as lc_agents
+    monkeypatch.setattr(lc_agents, "create_agent",
+                        lambda *a, **k: _FakeAgent())
+
+    from app.services.lc_agent import run_lc
+
+    with pytest.raises(RuntimeError, match="闭环"):
+        run_lc(db_session, task)   # ctx.written=False / 无 review_id → 必炸
+
+
+def test_recover_reason_states_only_the_fact(db_session):
+    """自愈原因只许陈述事实（运行未完成），禁止虚构「系统维护中断」。"""
+    from tests.factory import make_form
+
+    from app.services.state_machine import recover_interrupted
+
+    task = make_form(db_session)
+    task.task_status = "reviewing"   # 模拟悬置孤儿
+    db_session.commit()
+
+    recover_interrupted(db_session)
+    db_session.refresh(task)
+
+    assert task.task_status == "blocked"
+    assert "运行未完成" in (task.block_reason or "")
+    assert "维护中断" not in (task.block_reason or "")   # 不许虚构原因
 
 
 def test_save_review_result_rejects_silent_comment_fallback(db_session):

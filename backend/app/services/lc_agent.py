@@ -167,6 +167,17 @@ def run_lc(db_session: Session, task: ApprovalTask, *, dry_run: bool = False) ->
         config={"recursion_limit": max(16, int(s.agent_max_steps) * 2)},
     )
     messages = raw.get("messages", [])
+
+    # 闭环验证：图跑完≠闭环。工具连败后模型自弃、没写回意见就返回 succeeded
+    # 是假成功（真机 141 号单事故）——零容忍，如实掀桌转人工。
+    if dry_run:
+        closed, missing = bool(ctx.review_id), "审查结果未保存"
+    else:
+        closed, missing = bool(ctx.written), "审查意见未写回审批单"
+    if not closed:
+        raise RuntimeError(
+            f"AI 未完成审查闭环（{missing}）——禁止假成功，任务如实转人工")
+
     return {"status": "succeeded", "steps": len(messages),
             "raw_output": _final_text(messages)[:600],
             "trace": list(ctx.trace)}
