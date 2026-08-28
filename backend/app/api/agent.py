@@ -133,6 +133,11 @@ def run(req: dict, db: Session = Depends(get_db)) -> dict:
         result = run_full_cycle(db, task, dry_run=bool(req.get("dry_run")))
     except ToolError as exc:
         raise HTTPException(409, exc.code)
+    except Exception as exc:  # noqa: BLE001 —— 崩溃必须显式落状态，绝不留孤儿
+        from app.services.state_machine import block_task
+
+        block_task(db, task, "LLM_RUN_FAILED", f"运行失败已安全停机：{exc}"[:300])
+        raise HTTPException(502, f"本次运行失败，任务已转入「需人工处理」：{str(exc)[:200]}") from exc
 
     view = {"task_id": task.id, **result}
     trace = result.get("trace") or []

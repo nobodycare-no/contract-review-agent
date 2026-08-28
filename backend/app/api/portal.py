@@ -172,11 +172,19 @@ def diag_llm() -> dict:
 
 
 def _run_batch(ids: list[int]) -> None:
-    """批量送审工人：顺序执行，任何异常都被吞掉并在该任务的运行记录/状态中留痕。"""
+    """批量送审工人：顺序执行；启动先自愈孤儿任务，任何异常把该单显式转 blocked。"""
     from app.db import SessionLocal
-    
+    from app.services.state_machine import block_task, recover_interrupted
+
+    s0 = SessionLocal()
+    try:
+        recover_interrupted(s0)   # 先治历史卡死单（parsing/reviewing 孤儿 → blocked）
+    finally:
+        s0.close()
+
     for tid in ids:
         s = SessionLocal()
+        task = None
         try:
             task = s.query(ApprovalTask).filter_by(id=tid).one_or_none()
             if task is None:
@@ -186,7 +194,10 @@ def _run_batch(ids: list[int]) -> None:
 
             result = run_full_cycle(s, task)
             record_tool_trace(s, task, result.get("trace"))
-        except Exception:  # noqa: BLE001 —— 批量工人绝不向上抛
+        except Exception as exc:  # noqa: BLE001 —— 吞异常可以，吞状态不行
+            if task is not None:
+                block_task(s, task, "LLM_RUN_FAILED",
+                           f"批量运行失败已安全停机：{exc}"[:300])
             continue
         finally:
             s.close()

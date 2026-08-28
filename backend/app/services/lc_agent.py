@@ -20,10 +20,28 @@ from app.tools_registry import TOOLS_SCHEMA  # noqa: F401 —— schema 单一�
 
 _THINK = re.compile(r"<think>.*?</think>", re.S)
 
+# ===== Skill 模块化：方法论以片段形式挂载，辅助而非决策 =====
+SKILL_REVIEW_METHOD = (
+    "【方法论 skill：合同审查推荐路径】"
+    "① get_contract_approval 核对单据与附件清单 → ② download_contract_attachment 取件 → "
+    "③ parse_contract_document 得到结构化字段与条款 → "
+    "④ 需要时 search_contract_text 按关键词定位条款原文（上下文有限，优先检索而非通读）→ "
+    "⑤ list_review_rules 浏览公司规则库作参考线索，run_contract_rules 可跑一遍初筛 → "
+    "⑥ save_review_result 保存你亲笔撰写的意见 → ⑦ write_approval_comment 写回闭环。"
+)
+
 SYSTEM_PROMPT = (
-    "你是企业合同审批审查Agent。严格按顺序调用工具完成闭环："
-    "下载附件→解析文档→执行规则审查→保存审查结果→写回评论。"
-    "评论文本第一行必须是『总风险等级：高|中|低』。全程中文。"
+    "你是企业合同审批审查Agent。\n"
+    + SKILL_REVIEW_METHOD + "\n"
+    "【自主决策】上述是推荐路径而非铁律——请根据单据实际情况自主决定"
+    "调用哪些工具、以何顺序（例如缺附件单应尽早暴露问题，小单据可少走步骤）。"
+    "是否调用、调用什么、传什么参数，由你逐轮判断。\n"
+    "【规则库定位】规则是给 AI 的检索工具，不是结论：命中与建议仅作参考线索，"
+    "你必须回到合同原文逐条核实，结合自身常识独立判断。\n"
+    "【意见要求】最终审查意见完全由你撰写：引用条款原文佐证，指出风险并给出可执行建议。"
+    "评论文本第一行必须是『总风险等级：高|中|低』，全程中文。\n"
+    "【模型自觉】你是 8B 级本地模型：上下文有限，不要试图一次读完整份合同，"
+    "善用检索工具定位关键条款；不确定就如实说明，禁止编造条款原文。"
 )
 
 
@@ -44,14 +62,19 @@ _DESC = {
     "get_contract_approval": "查看审批单详情：基本信息/表单字段/附件清单",
     "download_contract_attachment": "下载全部合同附件到本地存储（先于解析必做）",
     "parse_contract_document": "解析合同正文，产出八字段与八类条款结构",
-    "run_contract_rules": "执行规则库审查，返回命中/总风险等级/关注点",
-    "save_review_result": "保存审查结果，生成 review_id（write 前必须先调用）",
+    "run_contract_rules": "执行规则库初筛，返回命中/风险等级/关注点（仅参考线索，非结论）",
+    "list_review_rules": "浏览公司规则库清单（可带关键词过滤）——规则是给AI的检索工具，"
+                         "是否参考、参考哪些由你决定",
+    "search_contract_text": "在已解析的合同原文中按关键词定位条款原文片段——"
+                            "上下文有限时优先用它，别凭记忆复述条款",
+    "save_review_result": "保存审查结果（comment_text 必须是你亲笔撰写的完整意见，"
+                          "缺失会被拒绝），生成 review_id",
     "write_approval_comment": "将最终意见写回审批单评论区（闭环终点）",
 }
 
 
 def _lc_tools(ctx):
-    """把七工具执行器包装为 LangChain StructuredTool（复用统一包络）。"""
+    """把九工具执行器包装为 LangChain StructuredTool（复用统一包络）。"""
     from langchain_core.tools import StructuredTool
     from pydantic import BaseModel, Field  # noqa: F401
 
@@ -66,7 +89,8 @@ def _lc_tools(ctx):
 
     return [mk(n) for n in (
         "get_contract_approval", "download_contract_attachment",
-        "parse_contract_document", "run_contract_rules",
+        "parse_contract_document", "search_contract_text",
+        "list_review_rules", "run_contract_rules",
         "save_review_result", "write_approval_comment")]
 
 

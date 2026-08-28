@@ -83,11 +83,15 @@ async function submit(){
 async function batchStart(){
   running.value=true; msg.value='批次已在后台排队，列表将实时推进…'
   await api.batchReview(selectedIds.value)
+  const safety=setTimeout(()=>{
+    if(running.value){running.value=false;
+      msg.value='批次等待超时——失败的单已显示「需人工处理」，可重新勾选重跑'}
+  },240000)
   const timer=setInterval(async()=>{
     await loadQueue()
     const active=rows.value.filter(t=>selectedIds.value.includes(t.id)&&
       ['pending','parsing','reviewing'].includes(t.task_status))
-    if(!active.length){clearInterval(timer);running.value=false;
+    if(!active.length){clearInterval(timer);clearTimeout(safety);running.value=false;
       msg.value='批次执行完毕';selectedIds.value=[]}
   },1500)
 }

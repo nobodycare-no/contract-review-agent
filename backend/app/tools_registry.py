@@ -49,6 +49,11 @@ TOOLS_SCHEMA: list[dict] = [
     _fn("write_approval_comment", "将审查意见写回审批评论区",
         {"instance_id": {"type": "string"}, "review_id": {"type": "integer"}},
         ["instance_id", "review_id"]),
+    _fn("list_review_rules", "浏览公司规则库清单（AI 的参考线索工具：规则不是结论，"
+        "须回到合同原文独立核实）",
+        {"keyword": {"type": "string"}}, []),
+    _fn("search_contract_text", "在已解析的合同原文中按关键词定位条款原文（上下文有限时优先检索而非通读）",
+        {"keyword": {"type": "string"}}, ["keyword"]),
 ]
 
 
@@ -125,6 +130,13 @@ def execute_tool(ctx: RunContext, name: str, args: dict) -> str:
             result = {"overall_risk_level": summary["overall_risk_level"],
                       "hits": summary["hits"], "focus_points": summary["focus_points"]}
         elif name == "save_review_result":
+            comment_text = args.get("comment_text")
+            if not comment_text or not str(comment_text).strip():
+                # 意见完全来自 AI：拒绝确定性文案兜底（用户 2026-08-28 产品规则）
+                raise ToolError(
+                    "VALIDATION_ERROR",
+                    "审查意见必须由AI亲笔撰写——请综合合同原文与参考线索完成意见后，"
+                    "以 comment_text 传入本工具保存")
             summary = ctx.rules_summary or {}
             row = reviewer.save_result(
                 db, task,
@@ -134,8 +146,7 @@ def execute_tool(ctx: RunContext, name: str, args: dict) -> str:
                 f"命中 {len(summary.get('hits', []))} 条规则。",
                 focus_points_json=args.get("focus_points_json") or
                 summary.get("focus_points", []),
-                comment_text=args.get("comment_text") or
-                reviewer.build_comment_text(summary, None))
+                comment_text=comment_text)
             ctx.review_id = row.id
             result = {"review_id": row.id}
         elif name == "write_approval_comment":
@@ -164,6 +175,40 @@ def execute_tool(ctx: RunContext, name: str, args: dict) -> str:
             ctx.written = outcome.get("write_status") == "success"
             result = {"write_status": outcome.get("write_status"),
                       "deduped": outcome.get("deduped", False)}
+        elif name == "list_review_rules":
+            from app.models import ReviewRule
+
+            kw = (args.get("keyword") or "").strip()
+            rules = db.query(ReviewRule).filter(ReviewRule.rule_status == 1).all()
+            items = [{"code": r.rule_code, "name": r.rule_name,
+                      "risk_level": r.risk_level, "match_mode": r.match_mode,
+                      "match_text": r.match_text[:120],
+                      "suggestion": r.suggestion_text}
+                     for r in rules
+                     if not kw or kw in r.rule_name or kw in r.suggestion_text]
+            result = {"note": "规则库仅作参考线索——最终判断必须基于合同原文独立作出",
+                      "count": len(items), "rules": items[:20]}
+        elif name == "search_contract_text":
+            from app.models import ContractParse
+
+            kw = str(args.get("keyword") or "").strip()
+            if not kw:
+                raise ToolError("VALIDATION_ERROR", "keyword 不能为空")
+            parse_row = (db.query(ContractParse).filter_by(task_id=task.id)
+                         .order_by(ContractParse.id.desc()).first())
+            if parse_row is None or not parse_row.raw_text:
+                raise ToolError("PARSE_EMPTY", "请先解析合同，再检索条款原文")
+            low, kl = parse_row.raw_text.lower(), kw.lower()
+            matches, start = [], 0
+            while len(matches) < 8:
+                idx = low.find(kl, start)
+                if idx < 0:
+                    break
+                matches.append({
+                    "position": f"offset:{idx}",
+                    "snippet": parse_row.raw_text[max(0, idx - 40): idx + len(kw) + 120]})
+                start = idx + len(kw)
+            result = {"keyword": kw, "count": len(matches), "matches": matches}
         else:
             raise ToolError("UNKNOWN_TOOL", f"未注册工具: {name}")
         ctx.trace.append({"tool": name, "outcome": "ok"})
