@@ -92,11 +92,11 @@ const BKEY='cra_active_batch'
 
 function watchBatch(bid){
   running.value=true
-  msg.value='后台批次处理中：GPU 逐张处理（每张约 30~60 秒）。本页刷新不丢失跟踪。'
+  msg.value='后台批次处理中：已排队合同由工人并行审查（GLM 每张约 3~5 分钟）。本页刷新不丢失跟踪。'
   const safety=setTimeout(()=>{
     if(running.value){running.value=false; localStorage.removeItem(BKEY)
       msg.value='批次等待超时——请以列表状态与留痕为准'}
-  },900000)
+  },2400000)
   const timer=setInterval(async()=>{
     loadQueue()
     const st=await api.batchStatus(bid).catch(()=>null)
