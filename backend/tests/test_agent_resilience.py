@@ -464,6 +464,32 @@ def test_run_lc_repairs_recursion_exhaustion(db_session, monkeypatch):
     assert any(t["tool"] == "write_approval_comment" for t in result["trace"])
 
 
+def test_state_advances_by_intent_even_when_model_skips_steps(db_session):
+    """模型跳步（如跳过 download）时状态必须按意图推进——pending 单直奔 reviewing/done。"""
+    from tests.factory import make_form
+
+    from app.models import ContractParse
+    from app.tools_registry import RunContext, execute_tool
+
+    task = make_form(db_session)   # pending；上传场景附件已在本地，模型会跳过 download
+    db_session.add(ContractParse(task_id=task.id, parse_status="done",
+                                 raw_text="第五条 自动续约。合同金额：100万元。"))
+    db_session.commit()
+
+    ctx = RunContext(db=db_session, task=task)
+    execute_tool(ctx, "parse_contract_document", {})
+    db_session.refresh(task)
+    assert task.task_status == "reviewing", "跳过 download 时 parse 应把 pending 推进到 reviewing"
+
+    execute_tool(ctx, "save_review_result", {
+        "overall_risk_level": "中", "summary_text": "s",
+        "focus_points_json": [], "comment_text": "AI 亲笔意见"})
+    out = execute_tool(ctx, "write_approval_comment", {})
+    db_session.refresh(task)
+    assert task.task_status == "done", f"写回成功后必须闭环 done: {task.task_status}"
+    assert __import__("json").loads(out)["write_status"] == "success"
+
+
 def test_tool_exception_trace_carries_cause(db_session, monkeypatch):
     """EXC 轨迹必须携带原因——只记 EXC 两个字母等于让故障永远匿名。"""
     import json as _json
