@@ -390,6 +390,42 @@ def test_submit_basic_info_lets_ai_correct_extraction(db_session):
     assert row.basic_info_json["amount"].get("pos") is None or True
 
 
+def test_run_lc_returns_real_elapsed_ms(db_session, monkeypatch):
+    """真 run_lc（非测试桩）必须返回 elapsed_ms——0.0s 事故：字段算了没放进返回体。"""
+    import time as _time
+
+    from tests.factory import make_form
+
+    task = make_form(db_session)
+    monkeypatch.setenv("AGENT_ENGINE", "langchain")
+    monkeypatch.setenv("LLM_BASE_URL", "http://127.0.0.1:9/v1")
+
+    def fake_create_agent(model, tools, system_prompt=None, **kw):
+        tmap = {t.name: t for t in tools}
+
+        class _FakeAgent:
+            def invoke(self, inp, config=None):
+                _time.sleep(0.03)   # 模拟一次真实推理耗时
+                if "elapsed_probe" not in dir(_FakeAgent):
+                    tmap["save_review_result"].invoke({
+                        "overall_risk_level": "low", "summary_text": "s",
+                        "focus_points_json": [], "comment_text": "AI 亲笔意见"})
+                return {"messages": [*inp["messages"], {"content": "完成"}]}
+
+        return _FakeAgent()
+
+    import langchain.agents as lc_agents
+    monkeypatch.setattr(lc_agents, "create_agent", fake_create_agent)
+
+    from app.services.lc_agent import run_lc
+
+    result = run_lc(db_session, task, dry_run=True)
+
+    assert isinstance(result.get("elapsed_ms"), int), \
+        f"elapsed_ms 缺失，前端只能显示 0.0s: {sorted(result)}"
+    assert result["elapsed_ms"] >= 20
+
+
 def test_save_review_result_rejects_silent_comment_fallback(db_session):
     from tests.factory import make_form
 

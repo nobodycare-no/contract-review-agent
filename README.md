@@ -1,47 +1,49 @@
 # contract-review-agent · 合同审批审查 Agent
 
-> 自研生产级 Agent Harness × 七大工具 × 双通道 Function-Calling × 规则引擎
-> —— 合同风险自动审查并回写审批评论区（《大模型项目实战》§2.4）
+> **分支 feat/langchain-react-gpu-only（V2）**：LangChain 官方 Agent（LangGraph 引擎）× 十工具 × **零降级**
+> —— 合同风险自动审查并回写审批评论区（《大模型项目实战》§2.4）。
 
-无 RAG、无向量库——本项目的主战场是 **Agent 运行时工程**：
+## V2 核心事实（与 main v1.x 的差异见 [docs/V2分支现状.md](docs/V2分支现状.md)）
 
-| Harness 能力 | 说明 |
-|--------------|------|
-| 双通道 Function-Calling | vLLM 原生 tools API 为主，能力探测失败自动降级提示词 JSON 协议（ADR-B7） |
-| RunController 事件溯源 | 每步消息快照落库 `agent_runs`，进程崩溃后 **POST /runs/{id}/resume 断点恢复**（ADR-B8） |
-| 三维预算优雅终结 | 步数≤12（规范）× token × 墙钟，任一触顶走强制 save+write 收敛，绝不悬挂 |
-| 熔断器 | LLM 连续失败自动开路 60s，期间直接确定性通道，故障期演示不挂死 |
-| dry-run 模式 | `?dry_run=true` 全链路演练、不外发评论——写操作必备的安全阀 |
-| 幂等回写守卫 | success 状态拒绝重复外呼，防重复评论污染审批单 |
-| 可观测 | 结构化 JSON 日志(run_id/task_id 关联) + `GET /metrics`(Prometheus) + 组件级 `/health` |
-| 提示词版本注册表 | prompt_version/model/channel 入运行记录，结果可复现可审计 |
-| 轨迹录制回放 | 真实 GPU 会话录成 fixtures，CI 无 GPU 回放回归（ADR-B9，VCR 式） |
+| 维度 | V2 现状 |
+|------|---------|
+| 引擎 | `langchain.agents.create_agent`（底层 LangGraph），vLLM OpenAI 兼容原生 tools |
+| 工具 | **10 个**：九业务工具 + 规则初筛；签名以 ctx 驱动，schema 只声明真实消费的参数 |
+| 降级 | **不存在**。LLM 失败/闭环未完成 → 异常上抛 → 任务显式 blocked（人话原因 + 轨迹尾部） |
+| 闭环闸门 | 图跑完≠闭环：未写回审批评论 = 任务失败，绝不返回假成功 |
+| 同单互斥 | 双击/批量并发第二请求 409 拒绝；成功后释放 |
+| 诚实计时 | 响应携带 `elapsed_ms`（agent.invoke 真实墙钟），前端直显 |
+| 状态机 | `done→parsing`（再次审查）、`blocked→parsing`（重试即真跑引擎）；自愈原因只陈述事实 |
+| 批量 | `batch_id` 进度账本（done/skipped），前端轮询 `/app/batch/{id}` |
+| 时区 | compose `TZ=Asia/Shanghai`，新落库时间为中国时间 |
 
 ## 快速启动
 
 ```bash
-conda activate demo_env
-pip install -r backend/requirements.txt
-cp deploy/.env.example .env       # GPU 开机时填 LLM_BASE_URL
+cp deploy/.env.example .env       # 填 GPU 的 LLM_BASE_URL / LLM_MODEL
 cd deploy && docker compose up -d --build
-docker compose exec app python -m app.tools.bootstrap   # 灌规则库+注册mock审批单
+# GPU 侧 vLLM 启动参数与 30 秒自检：deploy/GPU_VLLM_START.md（必须含
+# --enable-auto-tool-choice --tool-call-parser hermes，否则一切工具调用 400）
 ```
 
-## 一键闭环演示
+## 验证
 
 ```bash
-docker compose exec app python -m app.tools.demo              # 彩色五阶段全程
-docker compose exec app python -m app.tools.demo --dry-run    # 演练模式：不外发评论
+cd backend && python -m pytest tests -q        # 87 passed, 2 skipped(真机用例 LC_LIVE=1)
+# 真机闭环：前台 :18000 上传合同 → AI 审查 → 详情页看留痕时间线与服务端耗时
 ```
 
 ## 文档
 
 | 文档 | 路径 |
 |------|------|
-| 需求文档 SRD | [docs/srd/SRD.md](docs/srd/SRD.md) |
-| 架构文档 SAD（9 条 ADR） | [docs/sad/SAD.md](docs/sad/SAD.md) |
-| 详细设计 SDD（Harness 规格 §7） | [docs/sdd/SDD.md](docs/sdd/SDD.md) |
-| 开发手册（切片计划） | [docs/开发手册.md](docs/开发手册.md) |
-| 部署手册（云端生产） | [docs/部署手册.md](docs/部署手册.md) |
+| **V2 分支现状（行为权威）** | [docs/V2分支现状.md](docs/V2分支现状.md) |
+| 需求文档 SRD（main 基线） | [docs/srd/SRD.md](docs/srd/SRD.md) |
+| 架构文档 SAD（main 基线 + 9 ADR） | [docs/sad/SAD.md](docs/sad/SAD.md) |
+| 详细设计 SDD（main 基线） | [docs/sdd/SDD.md](docs/sdd/SDD.md) |
+| 开发手册 | [docs/开发手册.md](docs/开发手册.md) |
+| 部署手册（含 GPU 卡） | [docs/部署手册.md](docs/部署手册.md) · [deploy/GPU_VLLM_START.md](deploy/GPU_VLLM_START.md) |
 | 测试评估报告 | [docs/测试评估报告.md](docs/测试评估报告.md) |
-| 需求覆盖验证报告 | [docs/需求覆盖验证报告.md](docs/需求覆盖验证报告.md) |
+| 需求覆盖验证报告（含 V2 复验） | [docs/需求覆盖验证报告.md](docs/需求覆盖验证报告.md) |
+
+> SRD/SAD/SDD/两手册描述 main v1.x 基线，文档顶部均有指向 V2 现状文档的准星注记。

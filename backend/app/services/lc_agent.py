@@ -199,7 +199,8 @@ def run_lc(db_session: Session, task: ApprovalTask, *, dry_run: bool = False) ->
 
     return {"status": "succeeded", "steps": len(messages),
             "raw_output": _final_text(messages)[:600],
-            "trace": list(ctx.trace)}
+            "trace": list(ctx.trace),
+            "elapsed_ms": elapsed_ms}
 
 
 def _ctx_new(db, task, dry_run):
