@@ -517,6 +517,26 @@ def test_tool_exception_trace_carries_cause(db_session, monkeypatch):
     assert "字段映射缺失" in exc_entry["outcome"]
 
 
+def test_reset_demo_wipes_uploaded_files(db_session, monkeypatch):
+    """还原干净状态：reset-demo 必须连上传文件目录一起清，不留真实合同遗物。"""
+    from pathlib import Path
+
+    from tests.factory import make_form
+
+    from app.core.config import get_settings
+    from app.services.approval_store import reset_demo
+
+    task = make_form(db_session, code="AP-REAL-1")
+    upload_dir = Path(get_settings().upload_dir)
+    assert any(upload_dir.glob("**/*")), "前置：上传文件应已落盘"
+
+    reset_demo()
+
+    leftovers = [p for p in upload_dir.glob("**/*")
+                 if p.is_file() and p.name == "合同.docx"]   # 工厂上传件的特征名
+    assert not leftovers, f"上传文件未清理: {leftovers[:3]}"
+
+
 def test_save_review_result_rejects_silent_comment_fallback(db_session):
     from tests.factory import make_form
 

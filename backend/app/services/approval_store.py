@@ -205,6 +205,14 @@ def reset_demo() -> dict:
             db.query(model).delete()
         db.commit()
 
+        # 文件层一并还原干净：上传的真实合同不留遗物（用户 2026-08-28 要求）
+        upload_root = Path(get_settings().upload_dir)
+        if upload_root.exists():
+            import shutil
+
+            shutil.rmtree(upload_root, ignore_errors=True)
+        upload_root.mkdir(parents=True, exist_ok=True)
+
         seeded = []
         profiles = [
             ("LOCAL-AP-2026-001", "GPU 服务器集群采购合同审批", "王铁柱",
