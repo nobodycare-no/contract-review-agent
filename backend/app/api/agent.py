@@ -122,7 +122,12 @@ def run(req: dict, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(404, f"找不到任务: {req}")
 
     from app.services.engine import run_full_cycle
+    from app.services.state_machine import transition
     from app.services.tool_errors import ToolError
+
+    if task.task_status == "done":
+        # 再次审查：done 单一键复检——先复位 parsing 再进引擎（车道无关）
+        transition(db, task, "parsing")
 
     try:
         result = run_full_cycle(db, task, dry_run=bool(req.get("dry_run")))
@@ -130,7 +135,11 @@ def run(req: dict, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(409, exc.code)
 
     view = {"task_id": task.id, **result}
-    view["trace"] = []
+    trace = result.get("trace") or []
+    view["trace"] = trace
+    from app.services.run_trace import record_tool_trace
+
+    record_tool_trace(db, task, trace)
     return view
 
 

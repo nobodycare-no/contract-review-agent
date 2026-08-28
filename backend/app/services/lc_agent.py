@@ -126,7 +126,8 @@ def run_lc(db_session: Session, task: ApprovalTask, *, dry_run: bool = False) ->
     )
     messages = raw.get("messages", [])
     return {"status": "succeeded", "steps": len(messages),
-            "raw_output": _final_text(messages)[:600]}
+            "raw_output": _final_text(messages)[:600],
+            "trace": list(ctx.trace)}
 
 
 def _ctx_new(db, task, dry_run):

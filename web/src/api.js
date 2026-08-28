@@ -4,6 +4,7 @@ export const api = {
   health: () => j('/health'),
   queue: () => j('/app/queue'),
   detail: id => j(`/agent/tasks/${id}`),
+  taskLogs: id => j(`/agent/tasks/${id}/logs`),
   pullForms: () => j('/tools/list_pending', { method: 'POST',
     headers: { 'Content-Type': 'application/json' }, body: '{"limit":20}' }),
   createForms: (fd) => fetch('/app/forms', { method: 'POST', body: fd }).then(r => r.json()),

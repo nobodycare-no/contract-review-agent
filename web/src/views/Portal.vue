@@ -58,7 +58,7 @@ const title=ref(''), applicant=ref('王铁柱'), bundle=ref(false)
 const pickedFiles=ref([]), uploading=ref(false)
 const upMsg=ref({ok:true,text:''})
 const filter=ref(''), rows=ref([]), selectedIds=ref([])
-const dry=ref(false), running=ref(false), msg=ref('')
+const running=ref(false), msg=ref('')
 
 const filtered=computed(()=>filter.value?rows.value.filter(t=>t.task_status===filter.value):rows.value)
 
