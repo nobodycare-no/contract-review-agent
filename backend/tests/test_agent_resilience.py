@@ -121,6 +121,76 @@ def test_toolbelt_passes_arguments_through_wrapper(db_session):
     assert "违约责任" in data["matches"][0]["snippet"]
 
 
+def test_retry_endpoint_actually_runs_engine(client, db_session, monkeypatch):
+    """重新处理=状态复位+真正跑引擎，绝不是「拨到 parsing 就撒手不管」。"""
+    from tests.factory import make_form
+
+    seen = {}
+    monkeypatch.setenv("AGENT_ENGINE", "langchain")
+
+    def fake_run_lc(db, task, *, dry_run=False):
+        seen["called"] = True
+        return {"status": "succeeded", "steps": 0}
+
+    monkeypatch.setattr(lc_module, "run_lc", fake_run_lc)
+
+    task = make_form(db_session)
+    task.task_status = "blocked"
+    task.block_reason = "系统维护中断，处理未完成——请点击重新处理"
+    db_session.commit()
+
+    resp = client.post(f"/agent/tasks/{task.id}/retry")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["resumed_stage"] == "parsing"
+    assert body["status"] == "succeeded"      # 引擎结果并入响应
+    assert seen.get("called") is True
+
+
+def test_retry_endpoint_failure_reblocks_not_orphan(client, db_session, monkeypatch):
+    """重试中崩溃 → 必须显式转回 blocked；绝不许单子悬在 parsing 无人管。"""
+    from tests.factory import make_form
+
+    _break_llm(monkeypatch, "GPU 未启动(ECONNREFUSED)")
+    task = make_form(db_session)
+    task.task_status = "blocked"
+    task.block_reason = "系统维护中断，处理未完成——请点击重新处理"
+    db_session.commit()
+
+    resp = client.post(f"/agent/tasks/{task.id}/retry")
+
+    assert resp.status_code == 502, resp.text
+    row = next(t for t in client.get("/app/queue").json()["tasks"]
+               if t["id"] == task.id)
+    assert row["task_status"] == "blocked"
+    assert "重试" in (row["block_reason"] or "")
+
+
+def test_run_endpoint_reopens_blocked_before_engine(client, db_session, monkeypatch):
+    """/agent/run 收到 blocked 单：先复位 parsing 再进引擎（与 done 单同一纪律）。"""
+    from tests.factory import make_form
+
+    seen = {}
+    monkeypatch.setenv("AGENT_ENGINE", "langchain")
+
+    def fake_run_lc(db, task, *, dry_run=False):
+        seen["status_seen"] = task.task_status
+        return {"status": "succeeded", "steps": 0}
+
+    monkeypatch.setattr(lc_module, "run_lc", fake_run_lc)
+
+    task = make_form(db_session)
+    task.task_status = "blocked"
+    task.block_reason = "系统维护中断，处理未完成——请点击重新处理"
+    db_session.commit()
+
+    resp = client.post("/agent/run", json={"task_id": task.id})
+
+    assert resp.status_code == 200, resp.text
+    assert seen["status_seen"] == "parsing"
+
+
 def test_save_review_result_rejects_silent_comment_fallback(db_session):
     from tests.factory import make_form
 

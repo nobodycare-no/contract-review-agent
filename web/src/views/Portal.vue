@@ -36,7 +36,7 @@
           <td><input type="checkbox" :value="t.id" v-model="selectedIds"/></td>
           <td><router-link :to="`/detail/${t.id}`" style="color:var(--ac)">{{ t.title }}</router-link></td>
           <td>{{ t.applicant }}</td>
-          <td><span :class="'pill p-'+t.task_status">{{ statusZh(t.task_status) }}</span></td>
+          <td><span :class="'pill p-'+t.task_status" :title="t.block_reason||''">{{ statusZh(t.task_status) }}</span></td>
           <td><span v-if="t.overall_risk_level" :class="'pill lv-'+t.overall_risk_level">{{ LEVEL[t.overall_risk_level] }}</span><span v-else class="pill lv-none">未评估</span></td>
           <td><span :class="'pill p-'+t.write_status">{{ WRITE[t.write_status] }}</span></td>
         </tr>

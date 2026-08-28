@@ -189,6 +189,11 @@ def _run_batch(ids: list[int]) -> None:
             task = s.query(ApprovalTask).filter_by(id=tid).one_or_none()
             if task is None:
                 continue
+            if task.task_status == "blocked":
+                # blocked 单进批次 = 重试语义：复位后再跑（缺附件由 retry_task 拒绝）
+                from app.services.state_machine import retry_task
+
+                retry_task(s, task)
             from app.services.engine import run_full_cycle
             from app.services.run_trace import record_tool_trace
 

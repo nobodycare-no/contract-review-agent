@@ -35,10 +35,14 @@
 
     <section v-if="d.review" class="card"><h3>审查意见全文</h3><pre class="opinion">{{ d.review.comment_text }}</pre></section>
     <section class="card"><h3>状态</h3><div class="kv"><b>任务</b><span>{{ STATUS[d.task.task_status] }}</span>
-      <b>意见写入</b><span>{{ WRITE[d.task.write_status] }}</span>
-      <template v-if="d.task.block_reason"><b>阻塞原因</b><span style="color:var(--hi)">{{ d.task.block_reason }}</span>
-        <b></b><button @click="doRetry">重新处理此单</button>
-        <span class="err" style="font-size:12px">{{ retryHint }}</span></template></div></section>
+      <b>意见写入</b><span>{{ WRITE[d.task.write_status] }}</span></div>
+      <div v-if="d.task.block_reason" class="block-box">
+        <div style="font-weight:600;color:var(--hi)">⛔ 需要人工处理</div>
+        <div style="font-size:13px;margin:4px 0">原因：<b>{{ d.task.block_reason }}</b></div>
+        <div style="font-size:13px;color:var(--dim)">怎么办：{{ blockGuide }}</div>
+        <button class="primary" style="margin-top:8px" :disabled="rerunning" @click="doRetry">重新处理此单</button>
+        <span style="margin-left:8px;font-size:12px;color:var(--dim)">{{ retryHint }}</span>
+      </div></section>
 
     <section class="card"><h3>审查留痕</h3>
       <div v-if="!timeline.length" style="color:var(--dim);font-size:13px">
@@ -89,7 +93,29 @@ async function load(){
   logs.value=await api.taskLogs(route.params.id).then(r=>r.logs||[]).catch(()=>[])
 }
 let retryHint=ref('')
-async function doRetry(){const r=await api.retry(route.params.id).catch(e=>({resumed_stage:'FAIL',detail:e.message}));if(r.resumed_stage){retryHint.value='';load()}else{retryHint.value=r.detail||'无法重试——请先补传附件';}}
+const GUIDE=[
+  [/NO_ATTACHMENTS/i,
+   '该单没有任何合同文件。当前版本不支持向已有单据补传附件——请以此单编号为准，在前台重新提交带完整附件的审批单。'],
+  [/系统维护中断/,
+   '此前进程中断导致任务悬置，数据本身无损。直接点「重新处理此单」，AI 会完整重跑（约 30~60 秒）。'],
+  [/LLM_RUN_FAILED|运行失败/,
+   '模型服务在本次运行中不可用或超时（常见：GPU 实例未启动、vLLM 崩溃、网络抖动）。先确认 GPU 在跑，再点「重新处理此单」重试；连续失败请查实例 /usr-data/log/qwen.log。'],
+  [/WRITE_FAILED|写入失败/,
+   '审查已完成但意见写回审批单失败。重新处理会恢复审查结果并重新写回，无需从头解析。'],
+]
+const blockGuide=computed(()=>{
+  const r=d.value?.task?.block_reason||''
+  for(const [re,tip] of GUIDE) if(re.test(r)) return tip
+  return '请依据上方原因处理；多数情况点「重新处理此单」让 AI 完整重跑即可。'
+})
+async function doRetry(){
+  rerunning.value=true
+  retryHint.value='正在复位并重跑（真机推理约需 30~60 秒），完成后自动刷新…'
+  const r=await api.retry(route.params.id).catch(e=>({detail:e.message}))
+  rerunning.value=false
+  if(r&&r.status==='succeeded'){retryHint.value='';load()}
+  else{retryHint.value=(r&&r.detail)||'无法重试——请先补传附件'}
+}
 
 const rerunning=ref(false), rerunHint=ref('')
 async function doRerun(){
@@ -111,4 +137,6 @@ load()
 .tl-dot.tl-err{background:var(--hi,#e5484d);box-shadow:0 0 0 3px rgba(229,72,77,.15)}
 .tl-dot.tl-write{background:#2ea36c;box-shadow:0 0 0 3px rgba(46,163,108,.15)}
 .tl-detail{font-size:12px;color:var(--dim,#8b93a7);margin-top:2px;word-break:break-all}
+.block-box{margin-top:10px;padding:10px 12px;border:1px solid rgba(229,72,77,.35);
+  border-radius:8px;background:rgba(229,72,77,.06)}
 </style>

@@ -74,6 +74,11 @@ def task_detail(task_id: int, db: Session = Depends(get_db)) -> dict:
 
 @router.post("/tasks/{task_id}/retry")
 def retry(task_id: int, db: Session = Depends(get_db)) -> dict:
+    """重新处理 = 状态复位(blocked→parsing) + 真正跑引擎。
+
+    历史缺陷：本端点曾只做状态机回拨就返回，任务永远悬在 parsing
+    无人处理（统一系统没有后台轮询工人）。现修复为同步跑完整闭环。
+    """
     task = db.query(ApprovalTask).filter_by(id=task_id).one_or_none()
     if task is None:
         raise HTTPException(404, "任务不存在")
@@ -81,7 +86,21 @@ def retry(task_id: int, db: Session = Depends(get_db)) -> dict:
         stage = retry_task(db, task)
     except ToolError as exc:
         raise HTTPException(409, str(exc))
-    return {"task_id": task.id, "resumed_stage": stage}
+
+    from app.services.engine import run_full_cycle
+    from app.services.run_trace import record_tool_trace
+    from app.services.state_machine import block_task
+
+    try:
+        result = run_full_cycle(db, task, dry_run=False)
+    except Exception as exc:  # noqa: BLE001 —— 重试崩溃必须显式落回 blocked
+        block_task(db, task, "LLM_RUN_FAILED",
+                   f"重试运行失败已安全停机：{exc}"[:300])
+        raise HTTPException(502, f"重试失败，任务已转回「需人工处理」：{str(exc)[:200]}") from exc
+
+    record_tool_trace(db, task, result.get("trace"))
+    return {"task_id": task.id, "resumed_stage": stage,
+            "trace": result.get("trace") or [], **result}
 
 
 @router.get("/tasks/{task_id}/logs")
@@ -128,6 +147,9 @@ def run(req: dict, db: Session = Depends(get_db)) -> dict:
     if task.task_status == "done":
         # 再次审查：done 单一键复检——先复位 parsing 再进引擎（车道无关）
         transition(db, task, "parsing")
+    elif task.task_status == "blocked":
+        # 需人工处理单：复位到 parsing 再进引擎（NO_ATTACHMENTS 会以 409 人话拒绝）
+        retry_task(db, task)
 
     try:
         result = run_full_cycle(db, task, dry_run=bool(req.get("dry_run")))
