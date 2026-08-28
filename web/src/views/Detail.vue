@@ -17,7 +17,7 @@
        <b v-if="!(d.attachments||[]).length">-</b><span v-if="!(d.attachments||[]).length" style="color:var(--dim)">无附件</span></div></section>
     <section class="card"><h3>合同基本信息</h3><div class="kv">
       <template v-for="(v,k) in d.parse?.basic_info||{}" :key="k">
-        <b>{{ ZH[k]||k }}</b><span>{{ v.value ?? '—' }}<i v-if="v.status==='inferred'">（推断）</i></span>
+        <b>{{ ZH[k]||k }}</b><span>{{ v.value ?? '—' }}<i v-if="v.status==='inferred'">（推断）</i><i v-else-if="v.status==='ai_verified'" style="color:var(--ac)">（AI 核对）</i></span>
       </template></div></section>
 
     <section class="card"><h3>按规则识别的风险</h3>
@@ -65,7 +65,7 @@ import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../api'
 const d=ref(null), logs=ref([])
-const LEVEL={high:'高风险',medium:'中风险',low:'低风险'}
+const LEVEL={high:'高风险',medium:'中风险',low:'低风险',高:'高风险',中:'中风险',低:'低风险'}
 const STATUS={pending:'待处理',parsing:'AI 审查中',reviewing:'AI 审查中',blocked:'需人工处理',done:'已完成'}
 const WRITE={not_written:'尚未生成',writing:'写入中…',success:'已写入评论区',failed:'写入失败'}
 const LOG_ZH={tool:'工具调用',agent:'Agent 动作',write:'意见写入',system:'系统',transition:'状态迁移'}

@@ -10,6 +10,7 @@ export const api = {
   createForms: (fd) => fetch('/app/forms', { method: 'POST', body: fd }).then(r => r.json()),
   batchReview: ids => j('/app/batch_review', { method: 'POST',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_ids: ids }) }),
+  batchStatus: id => j(`/app/batch/${id}`),
   runAgent: body => j('/agent/run', { method: 'POST',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   retry: id => fetch(`/agent/tasks/${id}/retry`, { method: 'POST' }).then(r => r.json()),

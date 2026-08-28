@@ -24,10 +24,10 @@ _THINK = re.compile(r"<think>.*?</think>", re.S)
 SKILL_REVIEW_METHOD = (
     "【方法论 skill：合同审查推荐路径】"
     "① get_contract_approval 核对单据与附件清单 → ② download_contract_attachment 取件 → "
-    "③ parse_contract_document 得到结构化字段与条款 → "
-    "④ 需要时 search_contract_text 按关键词定位条款原文（上下文有限，优先检索而非通读）→ "
-    "⑤ list_review_rules 浏览公司规则库作参考线索，run_contract_rules 可跑一遍初筛 → "
-    "⑥ save_review_result 保存你亲笔撰写的意见 → ⑦ write_approval_comment 写回闭环。"
+    "③ parse_contract_document 得到结构化初稿，并用 search_contract_text 核对"
+    "甲方/乙方/金额/日期等——解析器只是初稿，发现错漏立即用 submit_basic_info 以原文修正 → "
+    "④ list_review_rules 浏览公司规则库作参考线索，run_contract_rules 可跑一遍初筛 → "
+    "⑤ save_review_result 保存你亲笔撰写的意见 → ⑥ write_approval_comment 写回闭环。"
 )
 
 SYSTEM_PROMPT = (
@@ -62,12 +62,14 @@ def _chat_model():
 _DESC = {
     "get_contract_approval": "查看审批单详情：基本信息/表单字段/附件清单",
     "download_contract_attachment": "下载全部合同附件到本地存储（先于解析必做）",
-    "parse_contract_document": "解析合同正文，产出八字段与八类条款结构",
+    "parse_contract_document": "解析合同正文，产出结构化初稿（你可能需要用 submit_basic_info 修正）",
     "run_contract_rules": "执行规则库初筛，返回命中/风险等级/关注点（仅参考线索，非结论）",
     "list_review_rules": "浏览公司规则库清单（可带关键词过滤）——规则是给AI的检索工具，"
                          "是否参考、参考哪些由你决定",
     "search_contract_text": "在已解析的合同原文中按关键词定位条款原文片段——"
                             "上下文有限时优先用它，别凭记忆复述条款",
+    "submit_basic_info": "核对原文后修正解析出的基本信息（甲方/乙方/金额/日期等）——"
+                         "解析器只是初稿，你的修正以原文为准",
     "save_review_result": "保存审查结果（comment_text 必须是你亲笔撰写的完整意见，"
                           "缺失会被拒绝），生成 review_id",
     "write_approval_comment": "将最终意见写回审批单评论区（闭环终点）",
@@ -119,7 +121,7 @@ def _lc_tools(ctx):
 
     return [mk(n) for n in (
         "get_contract_approval", "download_contract_attachment",
-        "parse_contract_document", "search_contract_text",
+        "parse_contract_document", "submit_basic_info", "search_contract_text",
         "list_review_rules", "run_contract_rules",
         "save_review_result", "write_approval_comment")]
 

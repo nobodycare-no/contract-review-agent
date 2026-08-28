@@ -4,6 +4,7 @@ services:
   mysql:
     image: mysql:8.0
     environment:
+      TZ: Asia/Shanghai
       MYSQL_ROOT_PASSWORD: "${DB_ROOT_PASSWORD:-root123456}"
       MYSQL_DATABASE: contract_review
       MYSQL_USER: cra
@@ -26,6 +27,7 @@ services:
       dockerfile: backend/Dockerfile
     env_file: ../.env
     environment:
+      TZ: Asia/Shanghai
       MYSQL_URL: "mysql+pymysql://cra:${DB_PASSWORD:-cra123456}@mysql:3306/contract_review?charset=utf8mb4"
       UPLOAD_DIR: "/srv/storage/attachments"
     ports:

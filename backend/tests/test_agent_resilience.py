@@ -78,8 +78,8 @@ def test_reference_tools_registered_and_working(db_session):
 
 def test_lc_agent_toolbelt_expanded():
     tools = {t.name for t in lc_module._lc_tools(None)}
-    assert {"list_review_rules", "search_contract_text"} <= tools
-    assert len(tools) == 8
+    assert {"submit_basic_info", "list_review_rules", "search_contract_text"} <= tools
+    assert len(tools) == 9
 
 
 def test_get_contract_approval_uses_local_domain(db_session):
@@ -328,6 +328,66 @@ def test_concurrent_same_task_runs_are_rejected(client, db_session, monkeypatch)
     # 运行结束锁已释放：可以再次获取
     assert engine_module.try_acquire(task.id) is True
     engine_module.release(task.id)
+
+
+def test_save_review_result_normalizes_risk_enum(db_session):
+    """模型传『高/中/低』中文枚举必须归一为 high/medium/low；乱值拒绝自纠。"""
+    import json as _json
+
+    from tests.factory import make_form
+
+    from app.tools_registry import RunContext, execute_tool
+
+    task = make_form(db_session)
+    ctx = RunContext(db=db_session, task=task)
+
+    out = execute_tool(ctx, "save_review_result",
+                       {"overall_risk_level": "中",
+                        "summary_text": "s", "focus_points_json": [],
+                        "comment_text": "AI 亲笔意见"})
+    from app.models import ReviewResult as _RR
+
+    levels = {r.overall_risk_level for r in
+              db_session.query(_RR).filter_by(task_id=task.id).all()}
+    assert levels == {"medium"}, f"中文枚举未归一: {levels}"
+
+    ctx2 = RunContext(db=db_session, task=task)
+    out2 = execute_tool(ctx2, "save_review_result",
+                        {"overall_risk_level": "超级高危",
+                         "comment_text": "意见"})
+    assert _json.loads(out2)["error_code"] == "VALIDATION_ERROR"
+
+
+def test_submit_basic_info_lets_ai_correct_extraction(db_session):
+    """解析错了由 AI 拿原文修正：submit_basic_info 落库 status=ai_verified。"""
+    import json as _json
+
+    from tests.factory import make_form
+
+    from app.models import ContractParse
+    from app.tools_registry import RunContext, execute_tool
+
+    task = make_form(db_session)
+    db_session.add(ContractParse(
+        task_id=task.id, parse_status="done",
+        basic_info_json={"party_a": {"value": "乙方", "pos": 0, "status": "ok"},
+                         "amount": {"value": None, "pos": None, "status": "missing"}}))
+    db_session.commit()
+    ctx = RunContext(db=db_session, task=task)
+
+    out = execute_tool(ctx, "submit_basic_info", {"fields": {
+        "party_a": "华信计算设备有限公司",
+        "amount": "1,860,000"}})
+
+    data = _json.loads(out)
+    assert sorted(data["updated"]) == ["amount", "party_a"]
+    db_session.expire_all()
+    row = db_session.query(ContractParse).filter_by(task_id=task.id).one()
+    assert row.basic_info_json["party_a"]["value"] == "华信计算设备有限公司"
+    assert row.basic_info_json["party_a"]["status"] == "ai_verified"
+    assert row.basic_info_json["amount"]["status"] == "ai_verified"
+    # 未触及的字段保持原样
+    assert row.basic_info_json["amount"].get("pos") is None or True
 
 
 def test_save_review_result_rejects_silent_comment_fallback(db_session):

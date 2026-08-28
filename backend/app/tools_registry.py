@@ -48,6 +48,11 @@ TOOLS_SCHEMA: list[dict] = [
         ["overall_risk_level", "comment_text"]),
     _fn("write_approval_comment", "将已保存的审查意见写回审批单评论区（闭环终点，必调）",
         {"review_id": {"type": "integer"}}, []),
+    _fn("submit_basic_info", "用合同原文核对解析结果后，修正基本信息"
+        "（甲方/乙方/金额/日期等）——AI 以原文为准，解析器只是初稿",
+        {"fields": {"type": "object",
+                    "description": "字段名→修正值，如 {\"party_a\":\"XX公司\",\"amount\":\"1,860,000\"}"}},
+        ["fields"]),
     _fn("list_review_rules", "浏览公司规则库清单（AI 的参考线索工具：规则不是结论，"
         "须回到合同原文独立核实）",
         {"keyword": {"type": "string"}}, []),
@@ -138,11 +143,21 @@ def execute_tool(ctx: RunContext, name: str, args: dict) -> str:
                     "VALIDATION_ERROR",
                     "审查意见必须由AI亲笔撰写——请综合合同原文与参考线索完成意见后，"
                     "以 comment_text 传入本工具保存")
+            # 风险枚举归一：模型常传中文「高/中/低」，落库前统一为 high/medium/low
+            _RISK_MAP = {"高": "high", "中": "medium", "低": "low",
+                         "high": "high", "medium": "medium", "low": "low"}
+            raw_level = str(args.get("overall_risk_level")
+                            or (ctx.rules_summary or {}).get("overall_risk_level", "")
+                            or "").strip()
+            level = _RISK_MAP.get(raw_level.lower(), None)
+            if level is None:
+                raise ToolError("VALIDATION_ERROR",
+                                f"overall_risk_level 必须是 高|中|低 或 high|medium|low，"
+                                f"收到: {raw_level!r}")
             summary = ctx.rules_summary or {}
             row = reviewer.save_result(
                 db, task,
-                overall_risk_level=args.get("overall_risk_level") or
-                summary.get("overall_risk_level", "low"),
+                overall_risk_level=level,
                 summary_text=args.get("summary_text") or
                 f"命中 {len(summary.get('hits', []))} 条规则。",
                 focus_points_json=args.get("focus_points_json") or
@@ -150,6 +165,32 @@ def execute_tool(ctx: RunContext, name: str, args: dict) -> str:
                 comment_text=comment_text)
             ctx.review_id = row.id
             result = {"review_id": row.id}
+        elif name == "submit_basic_info":
+            from app.models import ContractParse
+
+            fields = args.get("fields") or {}
+            if not isinstance(fields, dict) or not fields:
+                raise ToolError("VALIDATION_ERROR", "fields 不能为空")
+            parse_row = (db.query(ContractParse).filter_by(task_id=task.id)
+                         .order_by(ContractParse.id.desc()).first())
+            if parse_row is None:
+                raise ToolError("PARSE_EMPTY", "请先解析合同，再修正基本信息")
+            _KNOWN = {"contract_title", "contract_no", "party_a", "party_b",
+                      "amount", "currency", "effective_date", "expire_date"}
+            info = dict(parse_row.basic_info_json or {})
+            updated = []
+            for k, v in fields.items():
+                if k not in _KNOWN or v is None or not str(v).strip():
+                    continue
+                info[k] = {"value": str(v).strip(), "pos": None,
+                           "status": "ai_verified"}
+                updated.append(k)
+            if not updated:
+                raise ToolError("VALIDATION_ERROR",
+                                f"没有可识别的字段名，可用: {sorted(_KNOWN)}")
+            parse_row.basic_info_json = info
+            db.commit()
+            result = {"updated": sorted(updated)}
         elif name == "write_approval_comment":
             if ctx.dry_run:
                 ctx.trace.append({"tool": name, "outcome": "dry_run_skip"})
