@@ -73,19 +73,48 @@ _DESC = {
 }
 
 
+def _tool_arg_models() -> dict:
+    """从 TOOLS_SCHEMA（单一事实源）动态生成每个工具的强类型参数模型。
+
+    此前的空属性 schema(extra=allow) 会把模型传的实参整体吞掉——
+    真机联调暴露：search_contract_text 连续 VALIDATION_ERROR。
+    """
+    from typing import Optional
+
+    from pydantic import BaseModel, create_model
+
+    class _ExtraAllow(BaseModel):
+        model_config = {"extra": "allow"}
+
+    _PY = {"string": str, "integer": int, "number": float,
+           "boolean": bool, "array": list, "object": dict}
+    models = {}
+    for t in TOOLS_SCHEMA:
+        fn = t["function"]
+        props = fn["parameters"].get("properties", {})
+        req = set(fn["parameters"].get("required", []))
+        fields = {}
+        for pname, spec in props.items():
+            py = _PY.get(spec.get("type"), str)
+            fields[pname] = (py, ...) if pname in req else (Optional[py], None)
+        models[fn["name"]] = create_model(f"{fn['name']}_Args",
+                                          __base__=_ExtraAllow, **fields)
+    return models
+
+
+_ARG_MODELS = _tool_arg_models()
+
+
 def _lc_tools(ctx):
     """把九工具执行器包装为 LangChain StructuredTool（复用统一包络）。"""
     from langchain_core.tools import StructuredTool
-    from pydantic import BaseModel, Field  # noqa: F401
-
-    class _Any(BaseModel):
-        model_config = {"extra": "allow"}
 
     def mk(name: str):
         return StructuredTool.from_function(
             coroutine=None,
             func=lambda **kwargs: _run_tool(ctx, name, kwargs),
-            name=name, description=_DESC.get(name, name), args_schema=_Any)
+            name=name, description=_DESC.get(name, name),
+            args_schema=_ARG_MODELS.get(name))
 
     return [mk(n) for n in (
         "get_contract_approval", "download_contract_attachment",

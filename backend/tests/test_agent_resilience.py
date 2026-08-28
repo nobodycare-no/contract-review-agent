@@ -98,6 +98,29 @@ def test_get_contract_approval_uses_local_domain(db_session):
     assert data["attachments"], "附件清单不应为空"
 
 
+def test_toolbelt_passes_arguments_through_wrapper(db_session):
+    """StructuredTool 必须保真传参：空属性 schema 会吞掉模型给的 keyword。"""
+    import json as _json
+
+    from tests.factory import make_form
+
+    from app.models import ContractParse
+    from app.tools_registry import RunContext
+
+    task = make_form(db_session)
+    db_session.add(ContractParse(task_id=task.id, parse_status="done",
+                                 raw_text="第七条 违约责任：任何一方违约应赔偿对方损失。"))
+    db_session.commit()
+    ctx = RunContext(db=db_session, task=task)
+
+    tools = {t.name: t for t in lc_module._lc_tools(ctx)}
+    out = tools["search_contract_text"].invoke({"keyword": "违约"})
+
+    data = _json.loads(out)
+    assert "error_code" not in data, data
+    assert "违约责任" in data["matches"][0]["snippet"]
+
+
 def test_save_review_result_rejects_silent_comment_fallback(db_session):
     from tests.factory import make_form
 
