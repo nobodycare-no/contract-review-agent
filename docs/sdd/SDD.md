@@ -1,142 +1,160 @@
-﻿> [!NOTE]
-> 本文描述 **main v1.x 基线**。分支 \eat/langchain-react-gpu-only\（V2：LangChain ReAct、十工具、零降级、重试即真跑引擎等）的行为差异以 [V2分支现状.md](V2分支现状.md) 为准，冲突处以该文档为准。
-# 杞欢璇︾粏璁捐鏂囨。锛圫DD锛夆€?鍚堝悓瀹℃壒瀹℃煡 Agent
+# 软件详细设计文档（SDD）— 合同审批审查 Agent
 
-| 椤?| 鍐呭 |
+> [!NOTE]
+> 本文描述 **main v1.x 基线**。分支 feat/langchain-react-gpu-only（V2：LangChain ReAct、十工具、零降级、重试即真跑引擎等）的行为差异以 [V2分支现状.md](../V2分支现状.md) 为准，冲突处以该文档为准。
+
+| 项 | 内容 |
 |----|------|
-| 鐗堟湰 | v1.1锛堝榻愬鏍镐慨璁級 |
-| 涓婃父 | docs/srd/SRD.md 路 docs/sad/SAD.md |
+| 版本 | v1.1（对齐复核修订） |
+| 上游 | docs/srd/SRD.md · docs/sad/SAD.md |
 
-> v1.1 鍙樻洿锛氭ā鍧楁爲瀵归綈椤圭洰 A 宸ョ▼缁撴瀯锛坅pi/schemas/tools/tests 鍒嗗眰锛夛紱鍕樿鍚堝悓鐢诲儚鏁伴噺锛涙柊澧?搂7 Agent 寰幆鍙岄€氶亾璁捐銆伮? 瑙ｆ瀽瀛楁褰掍竴鍖栬鍒欍€?
-## 1. 鏈嶅姟涓庢ā鍧楀垝鍒嗭紙瀵归綈 kb-platform 鍒嗗眰椋庢牸锛?
+> v1.1 变更：模块树对齐项目 A 工程结构（api/schemas/tools/tests 分层）；勘误合同画像数量；新增 §7 Agent 循环双通道设计、§8 解析字段归一化规则。
+
+## 1. 服务与模块划分（对齐 kb-platform 分层风格）
+
 ```
 mock-approval/                 backend/app/
-鈹溾攢鈹€ main.py                    鈹溾攢鈹€ main.py            FastAPI 瑁呴厤 + StaticFiles 鎸傝浇
-鈹溾攢鈹€ store.py  鍐呭瓨娉ㄥ唽琛?       鈹溾攢鈹€ api/
-鈹溾攢鈹€ contracts_def.py           鈹?  鈹溾攢鈹€ tools.py       涓冨伐鍏疯矾鐢?鈹?  (6浠藉鎵瑰崟鐢诲儚:             鈹?  鈹溾攢鈹€ agent.py       run/retry/tasks/logs
-鈹?   楂?涓?浣庨闄ヾocx脳3銆?      鈹?  鈹溾攢鈹€ admin.py       瑙勫垯/鏃ュ織/閲嶈瘯(Admin Token)
-鈹?   md鏁版嵁鍗忚脳1銆?            鈹?  鈹斺攢鈹€ mock_proxy.py  澶栭儴绯荤粺浠跨湡璺敱鎸傝浇
-鈹?   PNG鎵弿浠睹?銆?             鈹溾攢鈹€ schemas/           Pydantic 璇锋眰/鍝嶅簲妯″瀷
-鈹?   缂洪檮浠跺崟脳1)                鈹溾攢鈹€ services/
-鈹斺攢鈹€ Dockerfile                 鈹?  鈹溾攢鈹€ fetcher.py     鎷夊彇+鍘婚噸 upsert
-                               鈹?  鈹溾攢鈹€ downloader.py  闄勪欢涓嬭浇钀界洏
-                               鈹?  鈹溾攢鈹€ parser.py      鍥涙牸寮忚В鏋?OCR+缁撴瀯鍖?                               鈹?  鈹溾攢鈹€ rule_engine.py 涓夋ā寮忓尮閰嶅紩鎿?                               鈹?  鈹溾攢鈹€ reviewer.py    椋庨櫓姹囨€?璇勮鐢熸垚(LLM/妯℃澘)
-                               鈹?  鈹溾攢鈹€ llm_client.py  vLLM 璁块棶+鑳藉姏鎺㈡祴(ADR-B7)
-                               鈹?  鈹斺攢鈹€ agent_loop.py  RunController 涓诲惊鐜?搂7)
-                               鈹溾攢鈹€ tools/
-                               鈹?  鈹溾攢鈹€ bootstrap.py   瑙勫垯11鏉＄瀛?mock娉ㄥ唽
-                               鈹?  鈹溾攢鈹€ record_replay.py LLM杞ㄨ抗褰曞埗/鍥炴斁(ADR-B9)
-                               鈹?  鈹斺攢鈹€ demo.py        闂幆婕旂ず CLI
-                               鈹溾攢鈹€ core/
-                               鈹?  鈹溾攢鈹€ config.py      鐜鍙橀噺闆嗕腑閰嶇疆
-                               鈹?  鈹斺攢鈹€ obs.py         JSON鏃ュ織+Prometheus鎸囨爣+鐔旀柇鍣?                               鈹溾攢鈹€ prompts/prompts.yaml 鎻愮ず璇嶇増鏈敞鍐岃〃(G5)
-                               鈹溾攢鈹€ models/            鍏〃瑙勮寖 + agent_runs 宸ョ▼瓒呴泦
-                               鈹斺攢鈹€ tests/             pytest(SQLite 鍐呭瓨搴?杞ㄨ抗鍥炴斁)
+├── main.py                    ├── main.py            FastAPI 装配 + StaticFiles 挂载
+├── store.py  内存注册表        ├── api/
+├── contracts_def.py           │   ├── tools.py       七工具路由
+│   (6份审批单画像:             │   ├── agent.py       run/retry/tasks/logs
+│    高/中/低风险docx×3、       │   ├── admin.py       规则/日志/重试(Admin Token)
+│    md数据协议×1、             │   └── mock_proxy.py  外部系统仿真路由挂载
+│    PNG扫描件×1、              ├── schemas/           Pydantic 请求/响应模型
+│    缺附件单×1)                ├── services/
+└── Dockerfile                 │   ├── fetcher.py     拉取+去重 upsert
+                               │   ├── downloader.py  附件下载落盘
+                               │   ├── parser.py      四格式解析+OCR+结构化
+                               │   ├── rule_engine.py 三模式匹配引擎
+                               │   ├── reviewer.py    风险汇总+评论生成(LLM/模板)
+                               │   ├── llm_client.py  vLLM 访问+能力探测(ADR-B7)
+                               │   └── agent_loop.py  RunController 主循环(§7)
+                               ├── tools/
+                               │   ├── bootstrap.py   规则11条种子+mock注册
+                               │   ├── record_replay.py LLM轨迹录制/回放(ADR-B9)
+                               │   └── demo.py        闭环演示 CLI
+                               ├── core/
+                               │   ├── config.py      环境变量集中配置
+                               │   └── obs.py         JSON日志+Prometheus指标+熔断器
+                               ├── prompts/prompts.yaml 提示词版本注册表(G5)
+                               ├── models/            八表规范 + agent_runs 工程超集
+                               └── tests/             pytest(SQLite 内存库+轨迹回放)
 
 backend/tests/                 deploy/
-鈹溾攢鈹€ test_rule_engine_matrix.py 鈹溾攢鈹€ mysql/init/01_schema.sql   鍏〃 DDL
-鈹溾攢鈹€ test_fetcher_dedup.py      鈹溾攢鈹€ acceptance/probe.py       AC-1~7 鎺㈤拡
-鈹溾攢鈹€ test_parser_extract.py     鈹斺攢鈹€ docker-compose.prod.yml   浜戠 override
-鈹溾攢鈹€ test_state_machine.py
-鈹溾攢鈹€ test_agent_loop_mock.py
-鈹斺攢鈹€ test_schema_alignment.py   web/  Vue3 鏋勫缓浜х墿鐢?app StaticFiles 鍚屾簮鎵樼
+├── test_rule_engine_matrix.py ├── mysql/init/01_schema.sql   八表 DDL
+├── test_fetcher_dedup.py      ├── acceptance/probe.py       AC-1~7 探针
+├── test_parser_extract.py     └── docker-compose.prod.yml   云端 override
+├── test_state_machine.py
+├── test_agent_loop_mock.py
+└── test_schema_alignment.py   web/  Vue3 构建产物由 app StaticFiles 同源托管
 ```
 
-## 2. Agent 闂幆鏃跺簭鍥撅紙涓婚摼璺級
+## 2. Agent 闭环时序图（主链路）
 
 ```mermaid
 sequenceDiagram
-    participant C as 璋冪敤绔?CLI/Web)
+    participant C as 调用端(CLI/Web)
     participant A as app /agent/run
     participant Q as Qwen3-8B(vLLM)
-    participant T as 涓冨伐鍏锋墽琛屽櫒
+    participant T as 七工具执行器
     participant M as mock-approval
 
     C->>A: POST {instance_id?}
-    A->>M: GET /mock/approvals (鎷夊彇寰呭姙)
-    M-->>A: 鍒楄〃(upsert鍘婚噸寤轰换鍔?
-    loop 鈮?2姝?function-calling
+    A->>M: GET /mock/approvals (拉取待办)
+    M-->>A: 列表(upsert去重建任务)
+    loop ≤12步 function-calling
         A->>Q: messages + tools[7]
         Q-->>A: tool_calls[]
-        A->>T: 鎵ц宸ュ叿(鍐呴儴鐩磋皟鏈嶅姟灞?
-        T-->>A: 缁撴灉JSON(鍥炲～messages)
+        A->>T: 执行工具(内部直调服务层)
+        T-->>A: 结果JSON(回填messages)
     end
-    alt 妯″瀷宸茶皟鐢?write_approval_comment
+    alt 模型已调用 write_approval_comment
         A-->>C: done
-    else 鍏滃簳
-        A->>T: 寮哄埗 save_review_result + write_approval_comment
+    else 兜底
+        A->>T: 强制 save_review_result + write_approval_comment
     end
     T->>M: POST /mock/approvals/{id}/comments
-    M-->>T: 鍥炲啓鎴愬姛
+    M-->>T: 回写成功
 ```
 
-**blocked 鍒嗘敮**锛氶檮浠朵笅杞藉け璐?瑙ｆ瀽绌?OCR澶辫触 鈫?task=blocked(+reason) 鈫?寰幆缁堟 鈫?POST /tasks/{id}/retry 鍙洖 parsing銆?
-## 3. 涓冨伐鍏?Schema锛堟毚闇茬粰妯″瀷鐨?JSON 瀹氫箟锛岀鍚嶅榻愯鑼?搂2.4.10锛?
-| 宸ュ叿 | 鍙傛暟 | 杩斿洖瑕佺偣 |
+**blocked 分支**：附件下载失败/解析空/OCR失败 → task=blocked(+reason) → 循环终止 → POST /tasks/{id}/retry 可回 parsing。
+
+## 3. 七工具 Schema（暴露给模型的 JSON 定义，签名对齐规范 §2.4.10）
+
+| 工具 | 参数 | 返回要点 |
 |------|------|---------|
 | list_pending_contract_approvals | limit | [{approval_code,title,applicant,apply_time,attachment_count}] |
-| get_contract_approval | instance_id | {瀹℃壒淇℃伅,琛ㄥ崟鏁版嵁,闄勪欢[],鐘舵€亇 |
+| get_contract_approval | instance_id | {审批信息,表单数据,附件[],状态} |
 | download_contract_attachment | instance_id, attachment_id, file_name | {local_path, sha256} |
 | parse_contract_document | document_id(=task_id) | {basic_info{}, clauses{}, parse_status} |
 | run_contract_rules | case_id(=task_id) | {hits[], overall_risk_level, focus_points[]} |
 | save_review_result | case_id, overall_risk_level, summary_text, focus_points_json, comment_text | {result_id} |
 | write_approval_comment | instance_id, review_id | {write_status:"success", comment_id} |
 
-## 4. 瑙勫垯搴撶瀛愶紙11 绫伙紝瑙勮寖 搂2.4.6锛?
-| rule_code | 鍚嶇О | 绾у埆 | mode | 鍖归厤閫昏緫 |
+## 4. 规则库种子（11 类，规范 §2.4.6）
+
+| rule_code | 名称 | 级别 | mode | 匹配逻辑 |
 |-----------|------|------|------|---------|
-| PAY_ADVANCE_HIGH | 棰勪粯娆炬瘮渚嬭繃楂?| high | regex | `棰勪粯[^銆俔{0,10}?([0-9]+)%` capture鈮?0 鍛戒腑 |
-| PAY_CYCLE_LONG | 浠樻鍛ㄦ湡杩囬暱 | medium | regex | `(?:楠屾敹鍚堟牸鍚巪浜や粯鍚?\s*([0-9]+)\s*(?:涓??宸ヤ綔鏃??:鍐??鏀粯` 鈮?0 |
-| AUTO_RENEW | 鑷姩缁害鏉℃ | medium | keyword | 鑷姩缁害,鑷姩寤堕暱,鏈熸弧鑷姩 |
-| NO_BREACH | 杩濈害璐ｄ换缂哄け | high | absence | 杩濈害,璧斿伩,璐ｄ换 |
-| JURISDICTION_RISK | 绠¤緰鍦颁笉鍒?| medium | regex | `绠¤緰.*?(鍘熷憡|琚憡|鎴戞柟|瀵规柟|渚涙柟).*?鎵€鍦ㄥ湴` |
-| PARTY_MISSING | 涓讳綋淇℃伅缂哄け | high | absence | 缁熶竴绀句細淇＄敤浠ｇ爜,钀ヤ笟鎵х収 |
-| AMOUNT_MISSING | 鍚堝悓閲戦缂哄け | high | absence | 鍚堝悓閲戦,鎬讳环,鍚堝悓鎬讳环娆?|
-| NDA_MISSING | 淇濆瘑鏉℃缂哄け | medium | absence | 淇濆瘑,鏈哄瘑 |
-| DATA_COMPLIANCE | 鏁版嵁澶勭悊鍚堣鎻愮ず | low | keyword | 涓汉淇℃伅,鏁版嵁瀹夊叏,鏁版嵁淇濇姢 |
-| IP_MISSING | 鐭ヨ瘑浜ф潈褰掑睘缂哄け | medium | absence | 鐭ヨ瘑浜ф潈,钁椾綔鏉?鎴愭灉褰掑睘 |
-| ACCEPTANCE_MISSING | 楠屾敹鏍囧噯缂哄け | high | absence | 楠屾敹,妫€楠屾爣鍑?|
+| PAY_ADVANCE_HIGH | 预付款比例过高 | high | regex | `预付[^。]{0,10}?([0-9]+)%` capture≥30 命中 |
+| PAY_CYCLE_LONG | 付款周期过长 | medium | regex | `(?:验收合格后|交付后)\s*([0-9]+)\s*(?:个)?工作日(?:内)?支付` ≥60 |
+| AUTO_RENEW | 自动续约条款 | medium | keyword | 自动续约,自动延长,期满自动 |
+| NO_BREACH | 违约责任缺失 | high | absence | 违约,赔偿,责任 |
+| JURISDICTION_RISK | 管辖地不利 | medium | regex | `管辖.*?(原告|被告|我方|对方|供方).*?所在地` |
+| PARTY_MISSING | 主体信息缺失 | high | absence | 统一社会信用代码,营业执照 |
+| AMOUNT_MISSING | 合同金额缺失 | high | absence | 合同金额,总价,合同总价款 |
+| NDA_MISSING | 保密条款缺失 | medium | absence | 保密,机密 |
+| DATA_COMPLIANCE | 数据处理合规提示 | low | keyword | 个人信息,数据安全,数据保护 |
+| IP_MISSING | 知识产权归属缺失 | medium | absence | 知识产权,著作权,成果归属 |
+| ACCEPTANCE_MISSING | 验收标准缺失 | high | absence | 验收,检验标准 |
 
-absence 璇箟锛歮atch_text 閫楀彿鍒嗛殧鍏抽敭璇嶇粍锛?*鍏ㄩ儴**鏈嚭鐜板嵆鍛戒腑锛堢己澶卞嵆椋庨櫓锛夈€?姹囨€昏鍒欙細overall = max(鍛戒腑绾у埆)锛涙棤鍛戒腑 鈫?low锛涘叧娉ㄧ偣 = 鍚勫懡涓?suggestion_text銆?
-## 4.1 API 娓呭崟锛堝叏闆嗭級
+absence 语义：match_text 逗号分隔关键词组，**全部**未出现即命中（缺失即风险）。
+汇总规则：overall = max(命中级别)；无命中 → low；关注点 = 各命中 suggestion_text。
 
-| 闈?| 璺敱 | 璇存槑 |
+## 4.1 API 清单（全集）
+
+| 面 | 路由 | 说明 |
 |----|------|------|
-| 宸ュ叿闈?| POST /tools/list_pending 路 /tools/get_approval 路 /tools/download_attachment 路 /tools/parse_document 路 /tools/run_rules 路 /tools/save_result 路 /tools/write_comment | 涓冨伐鍏凤紙Agent 涓?CLI 鍏辩敤鎵ц鍣級 |
-| Agent 闈?| POST /agent/run?dry_run=&background= 路 GET /agent/tasks 路 GET /agent/tasks/{id} 路 POST /agent/tasks/{id}/retry 路 GET /agent/tasks/{id}/logs 路 **GET /agent/runs/{run_id}** 路 **POST /agent/runs/{run_id}/resume** | 瑙﹀彂闂幆锛坉ry-run/鍚庡彴妯″紡锛?鏌ヨ/閲嶈瘯/鏃ュ織/**杩愯璇︽儏涓庢柇鐐规仮澶?G1)** |
-| Mock 闈?鍐呯綉) | GET /mock/approvals 路 GET /mock/approvals/{iid} 路 GET /mock/approvals/{iid}/attachments/{aid} 路 POST /mock/approvals/{iid}/comments 路 POST /mock/reset | 澶栭儴瀹℃壒绯荤粺浠跨湡 |
-| 绠＄悊闈?| GET/PUT /admin/rules 路 GET /admin/logs/{task_id} 路 POST /admin/reset-demo锛圶-Admin-Token锛?| 绯荤粺绠＄悊鍛?|
-| 杩愮淮闈?| **GET /metrics**锛圥rometheus 鏂囨湰锛壜?**GET /health**锛堢粍浠剁骇 mysql/mock/llm 鎺㈡祴锛?| 鎸囨爣鏆撮湶涓庡仴搴锋帰娴?N04/G4) |
+| 工具面 | POST /tools/list_pending · /tools/get_approval · /tools/download_attachment · /tools/parse_document · /tools/run_rules · /tools/save_result · /tools/write_comment | 七工具（Agent 与 CLI 共用执行器） |
+| Agent 面 | POST /agent/run?dry_run=&background= · GET /agent/tasks · GET /agent/tasks/{id} · POST /agent/tasks/{id}/retry · GET /agent/tasks/{id}/logs · **GET /agent/runs/{run_id}** · **POST /agent/runs/{run_id}/resume** | 触发闭环（dry-run/后台模式）/查询/重试/日志/**运行详情与断点恢复(G1)** |
+| Mock 面(内网) | GET /mock/approvals · GET /mock/approvals/{iid} · GET /mock/approvals/{iid}/attachments/{aid} · POST /mock/approvals/{iid}/comments · POST /mock/reset | 外部审批系统仿真 |
+| 管理面 | GET/PUT /admin/rules · GET /admin/logs/{task_id} · POST /admin/reset-demo（X-Admin-Token） | 系统管理员 |
+| 运维面 | **GET /metrics**（Prometheus 文本）· **GET /health**（组件级 mysql/mock/llm 探测） | 指标暴露与健康探测(N04/G4) |
 
-## 5. 閿欒澶勭悊鐭╅樀锛坆locked 瑙﹀彂闈級
+## 5. 错误处理矩阵（blocked 触发面）
 
-| 鐜妭 | 寮傚父 | 琛屼负 |
+| 环节 | 异常 | 行为 |
 |------|------|------|
-| 涓嬭浇 | 鏂囦欢涓嶅瓨鍦?mock 涓嶅彲杈?| blocked(block_reason) 鍙噸璇?|
-| 瑙ｆ瀽 | PDF 鏃犳枃瀛楀眰涓旈潪鎵弿璺緞 | 灏濊瘯 OCR 鈫?浠嶅け璐?blocked |
-| OCR | 鍥剧墖绌虹櫧/璇嗗埆鐜囦綆 | blocked锛堟紨绀洪樆濉炵敤渚嬶級 |
-| 瑙勫垯 | 姝ｅ垯缂栬瘧寮傚父 | 璇ヨ鍒?error 璺宠繃锛屼笉闃绘柇鏁翠綋 |
-| 鍥炲啓 | mock 璇勮鎺ュ彛 5xx | write_status=failed + blocked 鍙噸璇?|
+| 下载 | 文件不存在/mock 不可达 | blocked(block_reason) 可重试 |
+| 解析 | PDF 无文字层且非扫描路径 | 尝试 OCR → 仍失败 blocked |
+| OCR | 图片空白/识别率低 | blocked（演示阻塞用例） |
+| 规则 | 正则编译异常 | 该规则 error 跳过，不阻断整体 |
+| 回写 | mock 评论接口 5xx | write_status=failed + blocked 可重试 |
 
-## 6. 閰嶇疆椤?
-瑙?deploy/.env.example锛圡YSQL_URL / LLM_* / ADMIN_TOKEN / UPLOAD_DIR / TESSERACT_CMD / OCR_LANG / AGENT_MAX_STEPS锛夈€?
-## 7. Agent Harness 瑙勬牸 鈥?RunController锛圓DR-B7/B8/B9 钀藉湴锛寁1.2锛?
-### 7.1 杩愯妯″瀷涓庣敓鍛藉懆鏈?
+## 6. 配置项
+
+见 deploy/.env.example（MYSQL_URL / LLM_* / ADMIN_TOKEN / UPLOAD_DIR / TESSERACT_CMD / OCR_LANG / AGENT_MAX_STEPS）。
+
+## 7. Agent Harness 规格 — RunController（ADR-B7/B8/B9 落地，v1.2）
+
+### 7.1 运行模型与生命周期
+
 ```
 POST /agent/run
-  鈹斺攢> 鍒涘缓 agent_runs 琛?status=running, channel=pending, prompt_version)
-       鈹斺攢> RunController.run(run_id)
-            鈹溾攢 CAS 瀹堝崼: 鍚屼竴 task 宸叉湁 running 杩愯 鈫?409 鎷掔粷骞跺彂
-            鈹溾攢 鑳藉姏鎺㈡祴(杩涚▼绾х紦瀛?: native | json | circuit_open鈫抎eterministic
-            鈹溾攢 寰幆: LLM 璋冨害宸ュ叿鎵ц鍣紙涓ら€氶亾鍚屾墽琛屽櫒锛?            鈹?   姣忔: messages 蹇収 UPSERT 鍒?agent_runs.messages_json   鈫?鏂偣鎭㈠鐐?G1)
-            鈹?         steps_used/tokens/wall 绱姞, 浠讳竴棰勭畻瑙﹂《 鈫?finalize()
-            鈹溾攢 finalize(): 寮哄埗 save_review_result + write_approval_comment(甯︽姢鏍廏7)
-            鈹斺攢 缁堟€? succeeded | blocked(reason) | failed
-                 agent_runs 钀?finished_at/error_digest; task_logs 鍏ㄧ▼浜嬩欢
+  └─> 创建 agent_runs 行(status=running, channel=pending, prompt_version)
+       └─> RunController.run(run_id)
+            ├─ CAS 守卫: 同一 task 已有 running 运行 → 409 拒绝并发
+            ├─ 能力探测(进程级缓存): native | json | circuit_open→deterministic
+            ├─ 循环: LLM 调度工具执行器（两通道同执行器）
+            │    每步: messages 快照 UPSERT 到 agent_runs.messages_json   ← 断点恢复点(G1)
+            │          steps_used/tokens/wall 累加, 任一预算触顶 → finalize()
+            ├─ finalize(): 强制 save_review_result + write_approval_comment(带护栏G7)
+            └─ 终态: succeeded | blocked(reason) | failed
+                 agent_runs 落 finished_at/error_digest; task_logs 全程事件
 ```
 
-**CAS 骞跺彂瀹堝崼**锛氫换鍔＄姸鎬佽縼绉讳竴寰?`UPDATE ... WHERE id=? AND task_status IN (鍚堟硶鍓嶉┍闆嗗悎)`锛屽彈褰卞搷琛屾暟=0 鍗宠涓虹珵浜夊け璐ラ噸璇烩€斺€斾笉渚濊禆鍒嗗竷寮忛攣銆?
-### 7.2 agent_runs 琛紙绗節琛峰亸宸櫥璁帮級
+**CAS 并发守卫**：任务状态迁移一律 `UPDATE ... WHERE id=? AND task_status IN (合法前驱集合)`，受影响行数=0 即视为竞争失败重读——不依赖分布式锁。
+
+### 7.2 agent_runs 表（第九表·偏差登记）
 
 ```sql
 CREATE TABLE IF NOT EXISTS agent_runs (
@@ -153,7 +171,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     fallback_kind  VARCHAR(32) NULL COMMENT 'budget_steps|budget_tokens|budget_wall|circuit_open|llm_down|model_no_write',
     prompt_version VARCHAR(32) NOT NULL DEFAULT '',
     model_name     VARCHAR(64) NOT NULL DEFAULT '',
-    messages_json  JSON NULL COMMENT '鏈€杩戞秷鎭揩鐓?resume 婧?',
+    messages_json  JSON NULL COMMENT '最近消息快照(resume 源)',
     error_digest   VARCHAR(512) NULL,
     created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -162,36 +180,62 @@ CREATE TABLE IF NOT EXISTS agent_runs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
-### 7.3 鍙岄€氶亾璋冨害涓庣啍鏂?
-- **鑳藉姏鎺㈡祴**锛歚llm_client.probe()` 棣栨杩愯鏃跺彂 1-token 鏈€灏?tools 璇锋眰鈥斺€旇繑鍥炵粨鏋勫寲 tool_calls 鈫?閿佸畾 native锛涘惁鍒?json銆傜粨鏋滆繘绋嬪唴缂撳瓨銆?- **JSON 鍗忚绾﹀畾**锛歴ystem 娉ㄥ叆涓冨伐鍏风鍚嶏紱妯″瀷姣忚疆浠呰緭鍑轰竴琛?`{"tool":"...","args":{...}}` 鎴?`{"final":"..."}`锛涜В鏋愬彇棣栦釜骞宠　 `{...}` 鍧?+ `json.loads` 瀹芥澗瀹归敊銆?- **鐔旀柇鍣?*锛坈ore/obs.py锛夛細杩炵画澶辫触 鈮CIRCUIT_FAIL_THRESHOLD=3` 鈫?open `CIRCUIT_OPEN_SECONDS=60`锛沷pen 鏈熻皟鐢ㄧ洿鎺ヨ蛋 deterministic 骞惰 fallback_kind=circuit_open锛涘崐寮€鏈熸斁琛屼竴娆℃帰娴嬫垚鍔熷嵆 closed銆?
-### 7.4 涓夌淮棰勭畻涓庝紭闆呯粓缁?
-| 缁村害 | 榛樿 | 瑙﹂《琛屼负 |
+### 7.3 双通道调度与熔断
+
+- **能力探测**：`llm_client.probe()` 首次运行时发 1-token 最小 tools 请求——返回结构化 tool_calls → 锁定 native；否则 json。结果进程内缓存。
+- **JSON 协议约定**：system 注入七工具签名；模型每轮仅输出一行 `{"tool":"...","args":{...}}` 或 `{"final":"..."}`；解析取首个平衡 `{...}` 块 + `json.loads` 宽松容错。
+- **熔断器**（core/obs.py）：连续失败 ≥`CIRCUIT_FAIL_THRESHOLD=3` → open `CIRCUIT_OPEN_SECONDS=60`；open 期调用直接走 deterministic 并记 fallback_kind=circuit_open；半开期放行一次探测成功即 closed。
+
+### 7.4 三维预算与优雅终结
+
+| 维度 | 默认 | 触顶行为 |
 |------|------|---------|
-| 姝ユ暟 | `AGENT_MAX_STEPS=12`锛堣鑼冨瓧闈級 | finalize() |
-| token | `AGENT_TOKEN_BUDGET=24000`锛坧rompt+completion 绱锛?| finalize() |
-| 澧欓挓 | `AGENT_WALL_BUDGET_S=180`锛堟瘡姝ヨ竟鐣屾鏌ワ級 | finalize() |
+| 步数 | `AGENT_MAX_STEPS=12`（规范字面） | finalize() |
+| token | `AGENT_TOKEN_BUDGET=24000`（prompt+completion 累计） | finalize() |
+| 墙钟 | `AGENT_WALL_BUDGET_S=180`（每步边界检查） | finalize() |
 
-finalize() = 浠ュ凡閲囬泦 parse/rule 鏁版嵁璧版ā鏉挎剰瑙?鈫?save_review_result 鈫?write_approval_comment(鎶ゆ爮) 鈫?鎴愬姛鍒?succeeded(fallback_kind 璁板師鍥?锛涜瘎璁哄鍛煎け璐?鈫?blocked(write_failed) 鍙噸璇曘€?
-### 7.5 閿欒鍒嗙被瀛︼紙error_code 鈫?retriable 鈫?澶勭悊锛?
-| error_code | retriable | 澶勭悊 |
+finalize() = 以已采集 parse/rule 数据走模板意见 → save_review_result → write_approval_comment(护栏) → 成功则 succeeded(fallback_kind 记原因)；评论外呼失败 → blocked(write_failed) 可重试。
+
+### 7.5 错误分类学（error_code → retriable → 处理）
+
+| error_code | retriable | 处理 |
 |-----------|-----------|------|
-| MOCK_UNREACHABLE | 鏄?| 宸ュ叿缁撴灉鍥炲～閿欒鏂囨湰璁╂ā鍨嬭嚜绾狅紱杩炵画瑙﹀彂鐔旀柇閫昏緫 |
-| ATTACHMENT_MISSING / PARSE_EMPTY / OCR_FAILED | 鍚?| task=blocked(block_stage) 鍙汉宸?retry |
-| LLM_TIMEOUT / LLM_UNAVAILABLE | 鏄?| 鍥為€€纭畾鎬ц矾寰勶紱璁″叆鐔旀柇璁℃暟 |
-| VALIDATION_ERROR(宸ュ叿鍙傛暟) | 鏄?| 鏍￠獙閿欒鍥炲～妯″瀷鑷籂涓€娆★紝鍐嶇姱璧板厹搴?|
-| WRITE_GUARD_REJECTED | 鍚?| 骞傜瓑瀹堝崼鍛戒腑锛岀洿鎺ヨ繑鍥炴棦鏈夌粨鏋?|
+| MOCK_UNREACHABLE | 是 | 工具结果回填错误文本让模型自纠；连续触发熔断逻辑 |
+| ATTACHMENT_MISSING / PARSE_EMPTY / OCR_FAILED | 否 | task=blocked(block_stage) 可人工 retry |
+| LLM_TIMEOUT / LLM_UNAVAILABLE | 是 | 回退确定性路径；计入熔断计数 |
+| VALIDATION_ERROR(工具参数) | 是 | 校验错误回填模型自纠一次，再犯走兜底 |
+| WRITE_GUARD_REJECTED | 否 | 幂等守卫命中，直接返回既有结果 |
 
-HTTP 灞傦細GET 绫伙紙鎷夊彇/涓嬭浇/鍋ュ悍锛塰ttpx transport `retries=2, backoff_factor=0.5`锛汸OST 璇勮**涓嶈嚜鍔ㄩ噸璇?*锛堥潪骞傜瓑锛夛紝浠呮樉寮?retry 鍔ㄤ綔鍙噸鍙戙€?
-### 7.6 宸ュ叿鎵ц鍖呯粶
+HTTP 层：GET 类（拉取/下载/健康）httpx transport `retries=2, backoff_factor=0.5`；POST 评论**不自动重试**（非幂等），仅显式 retry 动作可重发。
 
-姣忎釜宸ュ叿 = Pydantic args schema + 鎵ц鍑芥暟 + result schema锛涚粺涓€鍖呯粶 `{ok, data|error{code,message,retriable}, ms}`銆傝秴鏃惰〃锛歞ownload 30s / parse(鍚玂CR) 90s / rules 10s / llm 鍗曡疆 120s / mock HTTP 15s銆傝秴鏃舵寜 retriable=鏄鐞嗗苟璁″叆鐔旀柇銆?
-### 7.7 鍙娴嬶紙N04/G4锛?
-- **JSON 鏃ュ織**锛歴tdout 姣忚 `{ts, level, event, run_id, task_id, tool?, ms?, err?}`锛涗笟鍔″彲瑙佸瓙闆嗗悓姝ヨ惤 task_logs銆?- **/metrics**锛坧rometheus_client锛夛細`cra_runs_total{channel,status}`銆乣cra_llm_calls_total{channel}`銆乣cra_tool_calls_total{tool,outcome}`銆乣cra_fallback_total{kind}`銆乣cra_blocked_total{reason}`銆乣cra_run_latency_seconds`(Histogram)銆乣cra_circuit_state`(Gauge 0/1/2)銆?- **/health**锛歚{status, components:{mysql:{ok,latency_ms}, mock:{ok}, llm:{ok,cached_probe}}}`锛屼换涓€缁勪欢澶辫触 status=degraded 浣嗕粛 200锛堢紪鎺掑眰鑷垽锛夈€?
-### 7.8 瀹夊叏鎶ゆ爮锛圙7锛?
-dry_run=true锛氬叏绋嬬湡瀹炴墽琛岋紝write_comment 鎵ц鍣ㄥ叆鍙ｅ鎷︽埅鏀硅鏃ュ織锛宎gent_runs.dry_run=1銆?鍥炲啓鍑€鍖栵細comment_text 鈮?000 瀛楃锛堟埅鏂姞鐪佺暐鏍囪锛夛紱蹇呴』鍚€屾€婚闄╃瓑绾с€嶈鍚﹀垯鎷掔粷鍥炲啓锛涙帶鍒剁/闆跺瀛楃娓呮礂銆?骞傜瓑瀹堝崼锛歵ask.write_status=success 鏃?write 宸ュ叿鐩存帴杩斿洖鏃㈡湁 comment 寮曠敤锛岄櫎闈?force=true锛圓dmin锛夈€?
-### 7.9 鎻愮ず璇嶇増鏈敞鍐岃〃锛圙5锛?
-`backend/app/prompts/prompts.yaml`锛氭瘡鏉?prompt 鍚?`id/version/template`锛汻unController 鍚姩鏃惰В鏋愬綋鍓嶆縺娲荤増鏈紝鍐欏叆 agent_runs.prompt_version銆傛敼鎻愮ず璇嶄笉鏀逛唬鐮佲€斺€斿崌 version 鍗冲彲杩芥函浠绘剰鍘嗗彶杩愯鐢ㄧ殑鏄摢鐗堟彁绀鸿瘝銆?
-### 7.10 杞ㄨ抗褰曞埗鍥炴斁锛圙6/ADR-B9锛?
-褰曞埗锛歚RECORD_TRAJECTORY=<case鍚?` 鏃讹紝LLMTransport 灏嗛€愯疆璇锋眰鎽樿+鍝嶅簲鍘熸牱杩藉姞鍐?`tests/fixtures/trajectories/<case>.jsonl`銆?鍥炴斁锛氭祴璇曡閰?FakeTransport 鎸?fixtures 椤哄簭鍚愬搷搴旓紱鏂█鐐瑰惈宸ュ叿璋冪敤搴忓垪銆佺粓鎬併€乫allback_kind銆侴PU 褰曚竴娆★紝CI 姘镐箙鍥炲綊銆?
-## 8. 瑙ｆ瀽瀛楁褰掍竴鍖栬鍒?
-- **閲戦 amount**锛氭鍒欐崟鑾峰悗褰掍竴鍖栦负鏁板€煎厓 `amount_value:number`锛?50涓囧厓"鈫?00000.00锛涘惈鍗冨垎浣?灏忔暟澶勭悊锛夛紝鍚屾椂淇濈暀 `raw_text:"50涓囧厓"` 涓?pos/status鈥斺€旇鍒欏紩鎿庯紙棰勪粯娆炬瘮渚嬨€侀噾棰濈己澶憋級涓€寰嬫秷璐瑰綊涓€鍖栧€笺€?- **鏃ユ湡 effective_date/expire_date**锛氱粺涓€涓?`YYYY-MM-DD` 瀛楃涓诧紱姝ｅ垯鏀剁揣骞翠唤閿氬畾锛坄(19|20)\d{2}骞碻锛夛紝娑堥櫎"鑷惀"绫昏鍖归厤銆?- **鏉℃瀹氫綅**锛氬叓绫绘潯娆惧潎杈撳嚭 `{status: present|absent, snippet?, pos?}`锛沘bsent 涔熷叆搴擄紙瑙勮寖瑕佹眰"涓嶅厑璁稿彧杩斿洖绌虹粨鏋?锛夈€?- 鎵€鏈夋彁鍙栧瓧娈典笁鍏冪粍 `{value, pos, status}` 涓?SDD 濂戠害锛孡LM 澧炲己鎻愬彇鐨勭粨鏋滃繀椤绘槧灏勫洖鍚屼竴濂戠害鍐嶅彔鍔狅紙LLM 鍙ˉ瀛楁鍊硷紝涓嶆敼缁撴瀯锛夈€?
+### 7.6 工具执行包络
+
+每个工具 = Pydantic args schema + 执行函数 + result schema；统一包络 `{ok, data|error{code,message,retriable}, ms}`。超时表：download 30s / parse(含OCR) 90s / rules 10s / llm 单轮 120s / mock HTTP 15s。超时按 retriable=是处理并计入熔断。
+
+### 7.7 可观测（N04/G4）
+
+- **JSON 日志**：stdout 每行 `{ts, level, event, run_id, task_id, tool?, ms?, err?}`；业务可见子集同步落 task_logs。
+- **/metrics**（prometheus_client）：`cra_runs_total{channel,status}`、`cra_llm_calls_total{channel}`、`cra_tool_calls_total{tool,outcome}`、`cra_fallback_total{kind}`、`cra_blocked_total{reason}`、`cra_run_latency_seconds`(Histogram)、`cra_circuit_state`(Gauge 0/1/2)。
+- **/health**：`{status, components:{mysql:{ok,latency_ms}, mock:{ok}, llm:{ok,cached_probe}}}`，任一组件失败 status=degraded 但仍 200（编排层自判）。
+
+### 7.8 安全护栏（G7）
+
+dry_run=true：全程真实执行，write_comment 执行器入口处拦截改记日志，agent_runs.dry_run=1。
+回写净化：comment_text ≤4000 字符（截断加省略标记）；必须含「总风险等级」行否则拒绝回写；控制符/零宽字符清洗。
+幂等守卫：task.write_status=success 时 write 工具直接返回既有 comment 引用，除非 force=true（Admin）。
+
+### 7.9 提示词版本注册表（G5）
+
+`backend/app/prompts/prompts.yaml`：每条 prompt 含 `id/version/template`；RunController 启动时解析当前激活版本，写入 agent_runs.prompt_version。改提示词不改代码——升 version 即可追溯任意历史运行用的是哪版提示词。
+
+### 7.10 轨迹录制回放（G6/ADR-B9）
+
+录制：`RECORD_TRAJECTORY=<case名>` 时，LLMTransport 将逐轮请求摘要+响应原样追加写 `tests/fixtures/trajectories/<case>.jsonl`。
+回放：测试装配 FakeTransport 按 fixtures 顺序吐响应；断言点含工具调用序列、终态、fallback_kind。GPU 录一次，CI 永久回归。
+
+## 8. 解析字段归一化规则
+
+- **金额 amount**：正则捕获后归一化为数值元 `amount_value:number`（"50万元"→500000.00；含千分位/小数处理），同时保留 `raw_text:"50万元"` 与 pos/status——规则引擎（预付款比例、金额缺失）一律消费归一化值。
+- **日期 effective_date/expire_date**：统一为 `YYYY-MM-DD` 字符串；正则收紧年份锚定（`(19|20)\d{2}年`），消除"自营"类误匹配。
+- **条款定位**：八类条款均输出 `{status: present|absent, snippet?, pos?}`；absent 也入库（规范要求"不允许只返回空结果"）。
+- 所有提取字段三元组 `{value, pos, status}` 为 SDD 契约，LLM 增强提取的结果必须映射回同一契约再叠加（LLM 只补字段值，不改结构）。

@@ -1,68 +1,96 @@
-﻿> [!NOTE]
-> 本文描述 **main v1.x 基线**。分支 \eat/langchain-react-gpu-only\（V2：LangChain ReAct、十工具、零降级、重试即真跑引擎等）的行为差异以 [V2分支现状.md](V2分支现状.md) 为准，冲突处以该文档为准。
-# 杞欢鏋舵瀯鏂囨。锛圫AD锛夆€?鍚堝悓瀹℃壒瀹℃煡 Agent
+# 软件架构文档（SAD）— 合同审批审查 Agent
 
-| 椤?| 鍐呭 |
+> [!NOTE]
+> 本文描述 **main v1.x 基线**。分支 feat/langchain-react-gpu-only（V2：LangChain ReAct、十工具、零降级、重试即真跑引擎等）的行为差异以 [V2分支现状.md](../V2分支现状.md) 为准，冲突处以该文档为准。
+
+| 项 | 内容 |
 |----|------|
-| 鐗堟湰 | v1.1锛堝榻愬鏍镐慨璁級 |
-| 涓婃父 | docs/srd/SRD.md |
+| 版本 | v1.1（对齐复核修订） |
+| 上游 | docs/srd/SRD.md |
 
-> v1.1 鍙樻洿锛氭柊澧?ADR-B7 娣峰悎 Function-Calling 璺緞锛浡? 閮ㄧ讲瑙嗗浘鎵╁睍浜戠閮ㄧ讲褰㈡€侊紱鍕樿 mock 鍚堝悓鐢诲儚鏁伴噺锛?鈫?锛夈€?
-## 1. 鎬讳綋鏋舵瀯锛堝弻鏈嶅姟锛?
+> v1.1 变更：新增 ADR-B7 混合 Function-Calling 路径；§4 部署视图扩展云端部署形态；勘误 mock 合同画像数量（5→6）。
+
+## 1. 总体架构（双服务）
+
 ```mermaid
 graph TB
-    U["娉曞姟瀹℃牳浜?/ 绠＄悊鍛?] -->|HTTP| APP
+    U["法务审核人 / 管理员"] -->|HTTP| APP
     CLI["demo CLI"] -->|HTTP| APP
 
-    subgraph APPSVC ["app 瀹瑰櫒 :8000"]
-        APP["FastAPI<br/>tools脳7 + agent + admin"]
-        RE["瑙勫垯寮曟搸<br/>keyword/regex/absence"]
-        AG["agent_loop 鈮?2姝?br/>function calling"]
+    subgraph APPSVC ["app 容器 :8000"]
+        APP["FastAPI<br/>tools×7 + agent + admin"]
+        RE["规则引擎<br/>keyword/regex/absence"]
+        AG["agent_loop ≤12步<br/>function calling"]
         APP --> RE
         AG --> RE
     end
 
-    subgraph MOCKSVC ["mock-approval 瀹瑰櫒 :8100 (妯℃嫙澶栭儴瀹℃壒绯荤粺)"]
-        MK["FastAPI<br/>寰呭姙/璇︽儏/闄勪欢docx娴?璇勮鎺ユ敹"]
-        DATA[("鍐呭瓨娉ㄥ唽琛?br/>6浠藉悎鍚岀敾鍍?)]
+    subgraph MOCKSVC ["mock-approval 容器 :8100 (模拟外部审批系统)"]
+        MK["FastAPI<br/>待办/详情/附件docx流/评论接收"]
+        DATA[("内存注册表<br/>6份合同画像")]
     end
 
-    APP -->|"MySQL 8琛?| DB[("MySQL 8")]
+    APP -->|"MySQL 8表"| DB[("MySQL 8")]
     AG -.->|"openai sdk tools"| Q["Qwen3-8B @ vLLM<br/>AutoDL 6006"]
-    AG -->|"鍥炲啓璇勮 POST"| MK
+    AG -->|"回写评论 POST"| MK
 ```
 
-**淇′换杈圭晫**锛歮ock-approval 瑙?app 涓哄敮涓€瀹㈡埛绔紙鍐呯綉锛夛紱app 鐨勭鐞嗛潰鐢?Admin Token 淇濇姢锛汚gent 瀵瑰浠呰闂?vLLM 涓?mock銆?
-## 2. 鏋舵瀯鍐崇瓥璁板綍锛圓DR锛?
-### ADR-B1 妯℃嫙瀹℃壒绯荤粺鐙珛鎴愬鍣?澶栭儴瀹℃壒绯荤粺鍦ㄧ湡瀹炰紒涓氫腑鏄嫭绔嬪瓙绯荤粺銆傜嫭绔嬪鍣ㄤ娇銆岃瘎璁哄洖鍐欍€嶆垚涓虹湡姝ｇ殑璺ㄦ湇鍔?HTTP POST锛岄檮浠朵笅杞借蛋鐪熷疄 HTTP 娴佲€斺€旈棴鐜紨绀轰笌鐢熶骇褰㈡€佸悓鏋勩€傚閫夛紙杩涚▼鍐呰矾鐢憋級琚惁鍐筹細璇存湇鍔涘急銆?
-### ADR-B2 OCR 閫夊瀷 tesseract(chi_sim)
-楠屾敹瑕佹眰瑙ｆ瀽鍥剧墖鎵弿浠躲€俀wen3-8B 鏃犺瑙夎兘鍔涳紱tesseract 瀹瑰櫒鍐呴泦鎴愭垚鏈渶浣庛€備腑鏂囧嵃鍒蜂綋璇嗗埆鐜囨弧瓒虫紨绀恒€傚眬闄愶細鎵嬪啓/浣庤川閲忓浘鐗囪瘑鍒樊 鈫?璧?blocked 娴佺▼锛堟伆濂芥紨绀洪樆濉炴満鍒讹級銆?
-### ADR-B3 瑙勫垯寮曟搸涓夋ā寮?keyword锛堝懡涓嵆椋庨櫓锛? regex锛堟暟鍊间笌姣斾緥鎻愬彇锛屽棰勪粯娆?30%锛? absence锛堢己澶辨帰娴嬶細鍏被鏉℃鍏抽敭璇嶇粍鍧囨湭鍑虹幇鍗宠Е鍙戯級銆俛bsence 鏄?楠屾敹鏍囧噯缂哄け銆佷繚瀵嗙己澶?绫昏鍒欑殑鍞竴鍙瀹炵幇銆?
-### ADR-B4 Agent 寰幆涓婇檺 12 姝?+ 寮哄埗鍏滃簳鍥炲啓
-闃叉ā鍨嬪彂鏁ｆ垨姝诲惊鐜€傛鏁拌€楀敖浠嶆湭鍥炲啓鏃讹紝绯荤粺鐩存帴浠ュ凡閲囬泦鐨勭粨鏋勫寲缁撴灉鎵ц write_approval_comment 鍏滃簳璺緞锛屼繚璇侀棴鐜繀鐒舵敹鏁涖€?
-### ADR-B5 LLM 闄嶇骇绛栫暐
-vLLM 涓嶅彲鐢ㄦ椂锛氳烦杩?LLM 瀛楁澧炲己涓庢憳瑕佹鼎鑹诧紝浣跨敤姝ｅ垯鎻愬彇缁撴灉 + 妯℃澘鍖栧鏌ユ剰瑙侊紝闂幆缁х画銆侴PU 浠呮彁鍗囪〃杈捐川閲忥紝涓嶆槸鍙敤鎬т緷璧栥€?
-### ADR-B6 璁よ瘉妯″瀷
-宸ュ叿闈笌 Agent 闈负鍐呯綉鑷姩鍖栬皟鐢紝涓嶈鐢ㄦ埛 JWT锛涚鐞嗛潰锛堣鍒欑紪杈?鏃ュ織/閲嶈瘯锛夌敤 `X-Admin-Token` 甯搁噺鏃堕棿姣旇緝淇濇姢銆俉eb 宸ヤ綔鍙板彧璇伙紝鏃犻壌鏉冿紙婕旂ず瀹氫綅锛夛紝鐢熶骇闇€鎺ュ叆 SSO銆?
-### ADR-B7 娣峰悎 Function-Calling 璺緞
-Agent 涓?LLM 鐨勫伐鍏疯皟搴﹂噰鐢?*鍙岄€氶亾**锛氣憼浼樺厛 vLLM 鍘熺敓 tools API锛圤penAI 鍏煎 `tools` 鍙傛暟 + `tool_calls` 杩斿洖锛岄渶鏈嶅姟绔?`--enable-auto-tool-choice --tool-call-parser hermes`锛夛紱鈶″惎鍔ㄦ椂瀵圭鐐瑰仛鑳藉姏鎺㈡祴锛堝彂閫佹渶灏?tools 璇锋眰锛夛紝鑻ヨ繑鍥炰笉鍚粨鏋勫寲 tool_calls 鎴栨姤閿欙紝鑷姩闄嶇骇涓?*鎻愮ず璇?JSON 鍗忚**鈥斺€旀ā鍨嬫寜绾﹀畾杈撳嚭 `{"tool": "...", "args": {...}}` 鍗曡 JSON锛岀敱 app 渚цВ鏋愬苟鎵ц鍚屼竴濂楀伐鍏锋墽琛屽櫒銆備袱閫氶亾鍏变韩宸ュ叿娉ㄥ唽琛ㄤ笌姝ユ暟涓婇檺锛涢檷绾т簨浠跺啓鍏?task_logs銆傜悊鐢憋細鍘熺敓璺緞鍚噾閲忛珮銆佽创鍚堣鑼冨瓧闈紱JSON 鍗忚淇濊瘉浠绘剰 vLLM 閰嶇疆/浠讳綍 OpenAI 鍏煎绔偣閮藉彲鐢ㄢ€斺€擥PU 婕旂ず涓嶅洜鏈嶅姟绔弬鏁拌鍗℃銆?
-### ADR-B8 鐢熶骇绾?RunController锛坴1.2 鏍稿績鍗囩骇锛?Agent 涓嶅啀鏄?涓€涓惊鐜嚱鏁?锛岃€屾槸鍏峰鐢熶骇杩愯鏃剁壒寰佺殑 **RunController**锛?- **浜嬩欢婧簮寮忔寔涔呭寲**锛氭瘡姝ュ皢瀹屾暣娑堟伅蹇収鍐欏叆鏂板 `agent_runs` 琛紙瑙勮寖鍏〃涔嬪鐨勭涔濊〃锛屽亸宸凡鐧昏锛夆€斺€旇繘绋嬪穿婧?閲嶅惎鍚庡彲浠庝换鎰忔**鏂偣鎭㈠**锛圥OST /agent/runs/{id}/resume锛夛紝鍚屾椂澶╃劧鏋勬垚瀹¤杞ㄨ抗锛?- **涓夌淮棰勭畻**锛氭鏁帮紙瑙勮寖瑕佹眰 鈮?2锛? token 涓婇檺 / 澧欓挓鏃堕檺锛屼换涓€瑙﹂《涓嶇‖澶辫触鑰屾槸杩涘叆**浼橀泤缁堢粨**璺緞锛堜互宸查噰闆嗘暟鎹己鍒?save+write锛夛紱
-- **鐔旀柇鍣?*锛歀LM 杩炵画澶辫触 鈮? 娆″紑璺?60s锛屽紑璺湡鐩存帴璧扮‘瀹氭€ч€氶亾鈥斺€旈槻姝㈡晠闅滄湡姣忎釜浠诲姟閮界櫧绛夎秴鏃讹紱
-- **骞茶窇妯″紡**锛歚POST /agent/run?dry_run=true` 鍏ㄩ摼璺湡瀹炴墽琛屼絾璺宠繃鏈€缁堣瘎璁哄鍛尖€斺€斿"鍐欏閮ㄧ敓浜х郴缁?鐨勬搷浣滃繀椤绘彁渚涙棤瀹虫紨缁冮€氶亾锛?- **骞傜瓑鍥炲啓瀹堝崼**锛歸rite_status=success 鐨勪换鍔℃嫆缁濋噸澶嶈瘎璁哄鍛硷紝闄ら潪鏄惧紡 force銆?
-澶囬€夊彇鑸嶏細涓嶅紩鍏?Celery/Redis 浠诲姟闃熷垪锛堟紨绀鸿妯″唴 FastAPI BackgroundTasks + DB 鐘舵€佹満瓒冲锛岄伩鍏嶈繍缁撮潰鎵╁ぇ锛夛紱涓嶅仛瀹屾暣浜嬩欢婧簮妗嗘灦锛堝崟琛ㄥ揩鐓у凡婊¤冻鎭㈠+瀹¤鍙岃瘔姹傦級銆傝繖浜涘彇鑸嶄娇鏋舵瀯鍦?1.5 澶╁唴鍙惤鍦颁笖姣忎釜鏈哄埗閮藉彲鐜板満婕旂ず銆?
-### ADR-B9 LLM 杞ㄨ抗褰曞埗鍥炴斁锛圴CR 寮忔祴璇曪級
-鐪熷疄 GPU 浼氳瘽涓綍鍒舵ā鍨嬬殑閫愯疆鍝嶅簲涓?fixtures锛圝SON 杞ㄨ抗鏂囦欢锛夛紝鍗曞厓/鍥炲綊娴嬭瘯閫氳繃 FakeTransport 鍥炴斁鈥斺€?*CI 鍏ㄧ▼鏃?GPU**锛屼笖鏈嶅姟绔彁绀鸿瘝鎴栬В鏋愰€昏緫鍙樻洿鏃惰兘绔嬪埢鍙戠幇杞ㄨ抗琛屼负婕傜Щ銆傝繖鏄?LLM 宸ョ▼浠?demo 闈犺繍姘?鍒?宸ョ▼鍙洖褰?鐨勫垎鐣岀嚎銆?
-### ADR-B10 LLM 鑷敱瑁侀噺瀹℃煡灞?瑙勫垯寮曟搸淇濊瘉涓嬮檺锛堢‘瀹氭€с€佸彲瀹¤銆佸彲鍥炲綊锛夛紝浣嗕笉瑕嗙洊璇箟绾ч暱灏鹃闄┿€傚湪 `run_contract_rules` 鍐呭彔鍔犱竴灞傦細浠ュ凡鍛戒腑娓呭崟+鍏ㄦ枃璇锋眰妯″瀷杈撳嚭**瑙勫垯搴撴湭瑕嗙洊鐨勫閲忛闄?*锛屾瘡鏉″己鍒舵惡甯﹀師鏂囧紩鐢ㄨ瘉鎹紝鏉ユ簮鏍囪 `AI_DISCRETIONARY`锛涙€昏瘎绛夌骇鍙栧苟闆嗘渶楂樸€佸彧鍗囦笉闄嶃€傝灞備换浣曞け璐ワ紙瓒呮椂/鍧?JSON/寮€鍏冲叧闂級**闈欓粯闄嶇骇涓虹函瑙勫垯缁撴灉**鈥斺€斾笌 ADR-B5 鍝插涓€鑷达細妯″瀷鎷撳睍涓婇檺锛屾案涓嶇牬鍧忎笅闄愩€傛彁绀鸿瘝鍏?prompts.yaml 鐗堟湰娉ㄥ唽琛ㄣ€?
-## 3. 瀛樺偍鑱岃矗闅旂
+**信任边界**：mock-approval 视 app 为唯一客户端（内网）；app 的管理面由 Admin Token 保护；Agent 对外仅访问 vLLM 与 mock。
 
-| 浠嬭川 | 鑱岃矗 | 绂佹 |
+## 2. 架构决策记录（ADR）
+
+### ADR-B1 模拟审批系统独立成容器
+外部审批系统在真实企业中是独立子系统。独立容器使「评论回写」成为真正的跨服务 HTTP POST，附件下载走真实 HTTP 流——闭环演示与生产形态同构。备选（进程内路由）被否决：说服力弱。
+
+### ADR-B2 OCR 选型 tesseract(chi_sim)
+验收要求解析图片扫描件。Qwen3-8B 无视觉能力；tesseract 容器内集成成本最低。中文印刷体识别率满足演示。局限：手写/低质量图片识别差 → 走 blocked 流程（恰好演示阻塞机制）。
+
+### ADR-B3 规则引擎三模式
+keyword（命中即风险）/ regex（数值与比例提取，如预付款>30%）/ absence（缺失探测：八类条款关键词组均未出现即触发）。absence 是"验收标准缺失、保密缺失"类规则的唯一可行实现。
+
+### ADR-B4 Agent 循环上限 12 步 + 强制兜底回写
+防模型发散或死循环。步数耗尽仍未回写时，系统直接以已采集的结构化结果执行 write_approval_comment 兜底路径，保证闭环必然收敛。
+
+### ADR-B5 LLM 降级策略
+vLLM 不可用时：跳过 LLM 字段增强与摘要润色，使用正则提取结果 + 模板化审查意见，闭环继续。GPU 仅提升表达质量，不是可用性依赖。
+
+### ADR-B6 认证模型
+工具面与 Agent 面为内网自动化调用，不设用户 JWT；管理面（规则编辑/日志/重试）用 `X-Admin-Token` 常量时间比较保护。Web 工作台只读，无鉴权（演示定位），生产需接入 SSO。
+
+### ADR-B7 混合 Function-Calling 路径
+Agent 与 LLM 的工具调度采用**双通道**：①优先 vLLM 原生 tools API（OpenAI 兼容 `tools` 参数 + `tool_calls` 返回，需服务端 `--enable-auto-tool-choice --tool-call-parser hermes`）；②启动时对端点做能力探测（发送最小 tools 请求），若返回不含结构化 tool_calls 或报错，自动降级为**提示词 JSON 协议**——模型按约定输出 `{"tool": "...", "args": {...}}` 单行 JSON，由 app 侧解析并执行同一套工具执行器。两通道共享工具注册表与步数上限；降级事件写入 task_logs。理由：原生路径含金量高、贴合规范字面；JSON 协议保证任意 vLLM 配置/任何 OpenAI 兼容端点都可用——GPU 演示不因服务端参数被卡死。
+
+### ADR-B8 生产级 RunController（v1.2 核心升级）
+Agent 不再是"一个循环函数"，而是具备生产运行时特征的 **RunController**：
+- **事件溯源式持久化**：每步将完整消息快照写入新增 `agent_runs` 表（规范八表之外的第九表，偏差已登记）——进程崩溃/重启后可从任意步**断点恢复**（POST /agent/runs/{id}/resume），同时天然构成审计轨迹；
+- **三维预算**：步数（规范要求 ≤12）/ token 上限 / 墙钟时限，任一触顶不硬失败而是进入**优雅终结**路径（以已采集数据强制 save+write）；
+- **熔断器**：LLM 连续失败 ≥3 次开路 60s，开路期直接走确定性通道——防止故障期每个任务都白等超时；
+- **干跑模式**：`POST /agent/run?dry_run=true` 全链路真实执行但跳过最终评论外呼——对"写外部生产系统"的操作必须提供无害演练通道；
+- **幂等回写守卫**：write_status=success 的任务拒绝重复评论外呼，除非显式 force。
+
+备选取舍：不引入 Celery/Redis 任务队列（演示规模内 FastAPI BackgroundTasks + DB 状态机足够，避免运维面扩大）；不做完整事件溯源框架（单表快照已满足恢复+审计双诉求）。这些取舍使架构在 1.5 天内可落地且每个机制都可现场演示。
+
+### ADR-B9 LLM 轨迹录制回放（VCR 式测试）
+真实 GPU 会话中录制模型的逐轮响应为 fixtures（JSON 轨迹文件），单元/回归测试通过 FakeTransport 回放——**CI 全程无 GPU**，且服务端提示词或解析逻辑变更时能立刻发现轨迹行为漂移。这是 LLM 工程从"demo 靠运气"到"工程可回归"的分界线。
+
+### ADR-B10 LLM 自由裁量审查层
+规则引擎保证下限（确定性、可审计、可回归），但不覆盖语义级长尾风险。在 `run_contract_rules` 内叠加一层：以已命中清单+全文请求模型输出**规则库未覆盖的增量风险**，每条强制携带原文引用证据，来源标记 `AI_DISCRETIONARY`；总评等级取并集最高、只升不降。该层任何失败（超时/坏 JSON/开关关闭）**静默降级为纯规则结果**——与 ADR-B5 哲学一致：模型拓展上限，永不破坏下限。提示词入 prompts.yaml 版本注册表。
+
+## 3. 存储职责隔离
+
+| 介质 | 职责 | 禁止 |
 |------|------|------|
-| MySQL | 鍏〃浜嬪疄婧?+ agent_runs 杩愯璁板綍锛堢涔濊〃锛屽伐绋嬭秴闆嗭級 | 涓嶅瓨鏂囦欢鏈綋 |
-| 鏈湴鐩?attachments/ | 涓嬭浇鐨勫悎鍚屾枃浠舵殏瀛?| 瑙ｆ瀽鍚庨潪鏉冨▉ |
-| mock 鍐呭瓨娉ㄥ唽琛?| 澶栭儴瀹℃壒鍗曚豢鐪熺姸鎬?| 閲嶅惎鍗冲浣嶏紙reset 绔偣鍙鐜版紨绀猴級 |
+| MySQL | 八表事实源 + agent_runs 运行记录（第九表，工程超集） | 不存文件本体 |
+| 本地盘 attachments/ | 下载的合同文件暂存 | 解析后非权威 |
+| mock 内存注册表 | 外部审批单仿真状态 | 重启即复位（reset 端点可复现演示） |
 
-## 4. 閮ㄧ讲瑙嗗浘
+## 4. 部署视图
 
-### 4.1 鏈湴寮€鍙戯紙Windows/Docker Desktop锛?涓夊鍣紙mysql / mock-approval / app锛? 涓撳睘缃戠粶 cranet + 鏁版嵁鍗?mysql_data锛沜ompose 椤圭洰鍚嶆樉寮忓０鏄?`contract-review-agent`锛屼笌椤圭洰 A 鐨?kbnet 浣撶郴瀹屽叏闅旂銆傚涓荤鍙ｏ細app `18000:8000`锛堝敮涓€鍏ュ彛锛寃eb 绠€鏄撻〉 StaticFiles 鍚屾簮鎸傝浇锛夈€乵ock 鍥炵幆璋冭瘯鍙?`127.0.0.1:18100:8100`锛堢敓浜хЩ闄わ級銆?
-### 4.2 浜戠鐢熶骇锛堟柊璐嫭绔嬩簯鏈嶅姟鍣級
-- 褰㈡€侊細鍚屼竴 compose + `docker-compose.prod.yml` override鈥斺€斿叏閮ㄦ湇鍔?`restart: unless-stopped`锛沵ock 鐨勫洖鐜鍙ｆ槧灏勭Щ闄わ紱app 鏄犲皠 `18000:8000` 渚涘缃戣闂紱MySQL 涓嶆毚闇插涓荤鍙ｏ紱attachments 浣跨敤鍛藉悕鍗锋寔涔呭寲銆?- 杈圭晫锛氬畨鍏ㄧ粍浠呮斁琛?SSH(22) 涓?18000锛汳ySQL/mock 浠呭唴缃戙€?- LLM锛欰utoDL 瀹炰緥鍏綉鏄犲皠 URL 濉叆 `LLM_BASE_URL`锛汫PU 鍏虫満鏃剁郴缁熸寜 ADR-B5/B7 鑷姩闄嶇骇绾鍒欐ā鏉挎ā寮忥紝浜戠鏈嶅姟涓嶄腑鏂€?- 鎿嶄綔瑙勭▼瑙?docs/閮ㄧ讲鎵嬪唽.md锛堟湇鍔″櫒鍒濆鍖栤啋瀹夎 Docker鈫掗厤缃啋鍚姩鈫掓帰閽堥獙鏀垛啋澶囦唤锛夈€?
+### 4.1 本地开发（Windows/Docker Desktop）
+三容器（mysql / mock-approval / app）+ 专属网络 cranet + 数据卷 mysql_data；compose 项目名显式声明 `contract-review-agent`，与项目 A 的 kbnet 体系完全隔离。宿主端口：app `18000:8000`（唯一入口，web 简易页 StaticFiles 同源挂载）、mock 回环调试口 `127.0.0.1:18100:8100`（生产移除）。
+
+### 4.2 云端生产（新购独立云服务器）
+- 形态：同一 compose + `docker-compose.prod.yml` override——全部服务 `restart: unless-stopped`；mock 的回环端口映射移除；app 映射 `18000:8000` 供外网访问；MySQL 不暴露宿主端口；attachments 使用命名卷持久化。
+- 边界：安全组仅放行 SSH(22) 与 18000；MySQL/mock 仅内网。
+- LLM：AutoDL 实例公网映射 URL 填入 `LLM_BASE_URL`；GPU 关机时系统按 ADR-B5/B7 自动降级纯规则模板模式，云端服务不中断。
+- 操作规程见 docs/部署手册.md（服务器初始化→安装 Docker→配置→启动→探针验收→备份）。
