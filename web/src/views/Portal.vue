@@ -93,6 +93,7 @@ const BKEY='cra_active_batch'
 function watchBatch(bid){
   running.value=true
   msg.value='后台批次处理中：已排队合同由工人并行审查（每张约 30~60 秒）。本页刷新不丢失跟踪。'
+  let miss=0   // 连续拿不到账本的次数（网络抖动容忍，服务重启解锁）
   const safety=setTimeout(()=>{
     if(running.value){running.value=false; localStorage.removeItem(BKEY)
       msg.value='批次等待超时——请以列表状态与留痕为准'}
@@ -100,10 +101,16 @@ function watchBatch(bid){
   const timer=setInterval(async()=>{
     loadQueue()
     const st=await api.batchStatus(bid).catch(()=>null)
-    if(st&&(st.done+st.skipped)>=st.total){
+    if(st===null){ miss+=1
+      if(miss>=5){ clearInterval(timer);clearTimeout(safety);running.value=false
+        localStorage.removeItem(BKEY)
+        msg.value='批次记录已不存在（服务可能重启）——请以列表状态为准，可重新发起审查'}
+      return }
+    miss=0
+    if(st&&(st.done+st.skipped+(st.failed||0))>=st.total){
       clearInterval(timer);clearTimeout(safety);running.value=false
       localStorage.removeItem(BKEY)
-      msg.value=`批次执行完毕：处理 ${st.done} 张${st.skipped?`，跳过 ${st.skipped} 张忙单`:''}`
+      msg.value=`批次执行完毕：成功 ${st.done} 张${st.failed?`，失败 ${st.failed} 张（已转需人工处理）`:''}${st.skipped?`，跳过 ${st.skipped} 张忙单`:''}`
       selectedIds.value=[]
     }
   },1500)
