@@ -296,6 +296,40 @@ def test_run_lc_repairs_missing_write_once_then_fails_loud(db_session, monkeypat
     assert "write_approval_comment" in str(calls[1]["messages"][-1])
 
 
+def test_concurrent_same_task_runs_are_rejected(client, db_session, monkeypatch):
+    """同一张单不允许并发双跑：第二个请求 409 人话拒绝，成功后锁必须释放。"""
+    from tests.factory import make_form
+
+    from app.services import engine as engine_module
+
+    monkeypatch.setenv("AGENT_ENGINE", "langchain")
+    monkeypatch.setattr(lc_module, "run_lc",
+                        lambda db, task, *, dry_run=False:
+                        {"status": "succeeded", "steps": 0,
+                         "trace": [], "elapsed_ms": 1234})
+
+    task = make_form(db_session)
+
+    # 模拟另一个工人正握着这单
+    assert engine_module.try_acquire(task.id) is True
+    try:
+        resp = client.post("/agent/run", json={"task_id": task.id})
+        assert resp.status_code == 409, resp.text
+        assert "正在审查" in resp.json()["detail"]
+    finally:
+        engine_module.release(task.id)
+
+    # 释放后可正常跑通，且响应携带服务端诚实计时
+    resp = client.post("/agent/run", json={"task_id": task.id})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "succeeded"
+    assert isinstance(body["elapsed_ms"], int) and body["elapsed_ms"] >= 0
+    # 运行结束锁已释放：可以再次获取
+    assert engine_module.try_acquire(task.id) is True
+    engine_module.release(task.id)
+
+
 def test_save_review_result_rejects_silent_comment_fallback(db_session):
     from tests.factory import make_form
 

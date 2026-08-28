@@ -163,10 +163,14 @@ def run_lc(db_session: Session, task: ApprovalTask, *, dry_run: bool = False) ->
              f"附件数={len(detail.get('attachments', []))}。开始闭环处理。"
              f"{'（dry-run：最终写入将被拦截）' if dry_run else ''}")
 
+    import time
+
+    started = time.monotonic()
     raw = agent.invoke(
         {"messages": [("user", brief)]},
         config={"recursion_limit": max(16, int(s.agent_max_steps) * 2)},
     )
+    elapsed_ms = int((time.monotonic() - started) * 1000)
     messages = raw.get("messages", [])
 
     def _closed() -> bool:

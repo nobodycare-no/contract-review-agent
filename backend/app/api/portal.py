@@ -189,16 +189,23 @@ def _run_batch(ids: list[int]) -> None:
             task = s.query(ApprovalTask).filter_by(id=tid).one_or_none()
             if task is None:
                 continue
-            if task.task_status == "blocked":
-                # blocked 单进批次 = 重试语义：复位后再跑（缺附件由 retry_task 拒绝）
-                from app.services.state_machine import retry_task
+            from app.services import engine as engine_module
 
-                retry_task(s, task)
-            from app.services.engine import run_full_cycle
-            from app.services.run_trace import record_tool_trace
+            if not engine_module.try_acquire(tid):   # 该单已在别处运行，跳过
+                continue
+            try:
+                if task.task_status == "blocked":
+                    # blocked 单进批次 = 重试语义：复位后再跑（缺附件由 retry_task 拒绝）
+                    from app.services.state_machine import retry_task
 
-            result = run_full_cycle(s, task)
-            record_tool_trace(s, task, result.get("trace"))
+                    retry_task(s, task)
+                from app.services.engine import run_full_cycle
+                from app.services.run_trace import record_tool_trace
+
+                result = run_full_cycle(s, task)
+                record_tool_trace(s, task, result.get("trace"))
+            finally:
+                engine_module.release(tid)
         except Exception as exc:  # noqa: BLE001 —— 吞异常可以，吞状态不行
             if task is not None:
                 block_task(s, task, "LLM_RUN_FAILED",

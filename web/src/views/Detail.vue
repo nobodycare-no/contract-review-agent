@@ -123,7 +123,10 @@ async function doRerun(){
   rerunHint.value='AI 正在重新审查（真机推理约需 30~60 秒），完成后自动刷新…'
   const r=await api.runAgent({task_id:d.value.task.id, dry_run:false}).catch(e=>({detail:e.message}))
   rerunning.value=false
-  if(r&&r.status==='succeeded'){rerunHint.value='';load()}
+  if(r&&r.status==='succeeded'){
+    rerunHint.value='重审完成，服务端耗时 '+((r.elapsed_ms||0)/1000).toFixed(1)+'s'
+    load()
+  }
   else{rerunHint.value=(r&&r.detail)||'重审失败，请稍后重试'}
 }
 load()
