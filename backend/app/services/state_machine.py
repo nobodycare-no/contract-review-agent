@@ -39,6 +39,26 @@ def transition(db: Session, task: ApprovalTask, to_status: str, *,
     return True
 
 
+def advance_to(db: Session, task: ApprovalTask, target: str) -> None:
+    """沿主干链 pending→parsing→reviewing→done 把任务推进到 target（幂等）。
+
+    动机：ReAct 模型会自主跳步（如上传场景附件已在本地而跳过 download 工具），
+    状态迁移若绑死工具序列就会断链——成功却被卡在 pending（真机 153/154 事故）。
+    target 不可达（当前为 blocked 等）时不动，由调用方决策。
+    """
+    chain = ["pending", "parsing", "reviewing", "done"]
+    try:
+        i = chain.index(task.task_status)
+        j = chain.index(target)
+    except ValueError:
+        return
+    if j <= i:
+        return
+    for step in chain[i + 1 : j + 1]:
+        if not transition(db, task, step):
+            return
+
+
 def block_task(db: Session, task: ApprovalTask, code: str, message: str) -> None:
     """统一阻塞入口：写状态/原因/任务日志/指标。"""
     stage = to_blocked_stage(code)

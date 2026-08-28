@@ -111,12 +111,23 @@ def execute_tool(ctx: RunContext, name: str, args: dict) -> str:
                 "file_name": r.file_name, "file_type": r.file_type,
                 "local_path": r.file_path, "sha256_head": r.download_status}
                 for r in rows]}
-        elif name == "parse_contract_document":
-            parse_row = reviewer.parse_task(db, task)
-            if task.task_status == "parsing":
+        elif name == "download_contract_attachment":
+            rows = fetcher.download_all(db, task)
+            if task.task_status == "pending":
                 from app.services.state_machine import transition
 
-                transition(db, task, "reviewing")
+                transition(db, task, "parsing")
+            result = {"attachments": [{
+                "file_name": r.file_name, "file_type": r.file_type,
+                "local_path": r.file_path, "sha256_head": r.download_status}
+                for r in rows]}
+        elif name == "parse_contract_document":
+            parse_row = reviewer.parse_task(db, task)
+            # 按意图推进：模型可能跳过 download（上传场景附件已在本地），
+            # 此时任务仍是 pending——沿主干链推进到 reviewing，不绑工具顺序
+            from app.services.state_machine import advance_to
+
+            advance_to(db, task, "reviewing")
             result = {"basic_info": parse_row.basic_info_json,
                       "clauses": {k: v["status"] for k, v in
                                   (parse_row.clause_info_json or {}).items()}}

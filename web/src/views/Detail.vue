@@ -2,8 +2,8 @@
   <div v-if="d">
     <div class="bar"><a class="back" @click="$router.back()">← 返回</a>
       <button @click="load">刷新</button>
-      <button v-if="d.task.task_status==='done'" class="primary"
-              :disabled="rerunning" @click="doRerun">再次审查</button>
+      <button v-if="['done','pending'].includes(d.task.task_status)" class="primary"
+              :disabled="rerunning" @click="doRerun">{{ d.task.task_status==='done' ? '再次审查' : '开始审查' }}</button>
       <span v-if="d.review" style="font-size:18px;font-weight:700">
         综合风险：{{ LEVEL[d.review.overall_risk_level]||d.review.overall_risk_level }}</span>
       <span class="msg">{{ rerunHint }}</span></div>

@@ -124,9 +124,11 @@ def write_comment(db: Session, task: ApprovalTask, review: ReviewResult) -> dict
     if fresh.write_status == "success":
         prior = db.query(CommentLog).filter_by(task_id=task.id)\
             .order_by(CommentLog.id.desc()).first()
-        # 幂等短路≠状态悬置：重审复位后评论已在，状态必须闭环到 done，
-        # 否则成功轮会被启动自愈误标 blocked（141 号事故）
-        transition(db, fresh, "done")
+        # 幂等短路≠状态悬置：评论已在则沿主干链把状态闭环到 done
+        # （模型跳步时任务可能仍处 pending——153/154 事故；单步 transition 会静默失败）
+        from app.services.state_machine import advance_to
+
+        advance_to(db, fresh, "done")
         return {"write_status": "success", "comment_log_id": prior.id if prior else None,
                 "deduped": True}
     if review.task_id != task.id:
@@ -142,7 +144,9 @@ def write_comment(db: Session, task: ApprovalTask, review: ReviewResult) -> dict
         db.add(CommentLog(task_id=task.id, write_status="success",
                           write_response_text=f"意见 #{review.id} 已写入审批单评论区（{n_chars} 字）"))
         db.commit()
-        transition(db, fresh, "done")
+        from app.services.state_machine import advance_to
+
+        advance_to(db, fresh, "done")   # 沿主干链闭环（模型跳步时不卡中间态）
         TOOL_CALLS.labels(tool="write_comment", outcome="success").inc()
         return {"write_status": "success", "mock_response": resp, "deduped": False}
     except ToolError as exc:
