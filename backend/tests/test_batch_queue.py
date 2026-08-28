@@ -65,6 +65,42 @@ def test_batch_queue_only_touches_pending(client, db_session, monkeypatch):
     assert t_blocked.task_status == "blocked"
 
 
+def test_batch_ledger_counts_failed_tasks(client, db_session, monkeypatch):
+    """批次里有单失败（blocked）必须计入账本 failed——否则 done+skipped<total
+    永不满足完成条件，前端按钮锁死（真机 2026-08-28：任务2 blocked 后用户
+    被锁在「后台批次处理中」，手动重试救活也不解锁）。"""
+    from tests.factory import make_form
+
+    import app.services.lc_agent as lc_module
+
+    monkeypatch.setenv("AGENT_ENGINE", "langchain")
+
+    def fake(db, task, *, dry_run=False):
+        if task.approval_code == "AP-F-002":
+            raise RuntimeError("AI 未完成审查闭环（审查意见未写回审批单）")
+        from app.services.state_machine import advance_to
+
+        advance_to(db, task, "done")
+        return {"status": "succeeded", "steps": 3, "trace": []}
+
+    monkeypatch.setattr(lc_module, "run_lc", fake)
+
+    t1 = make_form(db_session, code="AP-F-001")
+    t2 = make_form(db_session, code="AP-F-002")
+
+    resp = client.post("/app/batch_review", json={"task_ids": [t1.id, t2.id]})
+    bid = resp.json()["batch_id"]
+
+    status = client.get(f"/app/batch/{bid}").json()
+    assert status["done"] == 1
+    assert status["failed"] == 1, f"失败单必须计入账本：{status}"
+    assert status["done"] + status["failed"] + status["skipped"] == status["total"]
+
+    db_session.expire_all()
+    assert t1.task_status == "done"
+    assert t2.task_status == "blocked"   # 失败单显式 blocked，绝不留孤儿
+
+
 def test_batch_worker_flows_queued_to_done(client, db_session, monkeypatch):
     """工人开跑：queued→parsing（「AI 审查中」）→ … → done；账本逐张记 done。"""
     from tests.factory import make_form
