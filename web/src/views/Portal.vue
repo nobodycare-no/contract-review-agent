@@ -36,8 +36,8 @@
           <td><input type="checkbox" :value="t.id" v-model="selectedIds"/></td>
           <td><router-link :to="`/detail/${t.id}`" style="color:var(--ac)">{{ t.title }}</router-link></td>
           <td>{{ t.applicant }}</td>
-          <td><span :class="'pill p-'+t.task_status">{{ statusZh(t.task_status) }}</span></td>
-          <td><span v-if="t.overall_risk_level" :class="'pill lv-'+t.overall_risk_level">{{ LEVEL[t.overall_risk_level] }}</span><span v-else class="pill lv-none">未评估</span></td>
+          <td><span :class="'pill ' + pillCls(t)" :title="t.block_reason||''">{{ statusZh(t.task_status) }}</span></td>
+          <td><span v-if="t.overall_risk_level" :class="'pill lv-'+riskCls(t)">{{ LEVEL[t.overall_risk_level]||t.overall_risk_level }}</span><span v-else class="pill lv-none">未评估</span></td>
           <td><span :class="'pill p-'+t.write_status">{{ WRITE[t.write_status] }}</span></td>
         </tr>
       </tbody>
@@ -49,16 +49,20 @@
 import { onMounted, ref, computed } from 'vue'
 import { api } from '../api'
 
-const STATUS={pending:'待处理',parsing:'正在解析',reviewing:'正在审查',blocked:'需人工处理',done:'已完成'}
+const STATUS={pending:'待处理',parsing:'AI 审查中',reviewing:'AI 审查中',blocked:'需人工处理',done:'已完成'}
 const WRITE ={not_written:'尚未生成',writing:'写入中…',success:'已写入评论区',failed:'写入失败'}
-const LEVEL ={high:'高风险',medium:'中风险',low:'低风险'}
+const LEVEL ={high:'高风险',medium:'中风险',low:'低风险',高:'高风险',中:'中风险',低:'低风险'}
+const RISK_CLS={high:'high',medium:'medium',low:'low',高:'high',中:'medium',低:'low'}
 const statusZh=s=>STATUS[s]||s
+// parsing/reviewing 是内部工程状态（自愈锚点/CAS锁），对用户统一呈现为「AI 审查中」
+const pillCls=t=>['parsing','reviewing'].includes(t.task_status)?'p-reviewing':'p-'+t.task_status
+const riskCls=t=>RISK_CLS[t.overall_risk_level]||t.overall_risk_level
 
 const title=ref(''), applicant=ref('王铁柱'), bundle=ref(false)
 const pickedFiles=ref([]), uploading=ref(false)
 const upMsg=ref({ok:true,text:''})
 const filter=ref(''), rows=ref([]), selectedIds=ref([])
-const dry=ref(false), running=ref(false), msg=ref('')
+const running=ref(false), msg=ref('')
 
 const filtered=computed(()=>filter.value?rows.value.filter(t=>t.task_status===filter.value):rows.value)
 
@@ -81,14 +85,23 @@ async function submit(){
 
 
 async function batchStart(){
-  running.value=true; msg.value='批次已在后台排队，列表将实时推进…'
-  await api.batchReview(selectedIds.value)
+  running.value=true
+  msg.value='已提交后台队列：GPU 逐张处理（每张约 30~60 秒），完成即提示…'
+  const r=await api.batchReview(selectedIds.value)
+  const bid=r.batch_id
+  const safety=setTimeout(()=>{
+    if(running.value){running.value=false;
+      msg.value='批次等待超时——请以列表状态与留痕为准'}
+  },900000)
   const timer=setInterval(async()=>{
-    await loadQueue()
-    const active=rows.value.filter(t=>selectedIds.value.includes(t.id)&&
-      ['pending','parsing','reviewing'].includes(t.task_status))
-    if(!active.length){clearInterval(timer);running.value=false;
-      msg.value='批次执行完毕';selectedIds.value=[]}
+    loadQueue()
+    if(!bid) return
+    const st=await api.batchStatus(bid).catch(()=>null)
+    if(st&&(st.done+st.skipped)>=st.total){
+      clearInterval(timer);clearTimeout(safety);running.value=false
+      msg.value=`批次执行完毕：处理 ${st.done} 张${st.skipped?`，跳过 ${st.skipped} 张忙单`:''}`
+      selectedIds.value=[]
+    }
   },1500)
 }
 

@@ -37,9 +37,12 @@ def make_form(db_session, *, code: str = "AP-Z-001", title: str = "采购合同�
     from app.services.approval_store import create_form
 
     sources = [("合同.docx", docx_bytes())] * files
-    return create_form(title=title, applicant=applicant,
-                       sources=sources, approval_code=code,
-                       instance_id=f"LOCAL-{code}")
+    created = create_form(title=title, applicant=applicant,
+                          sources=sources, approval_code=code,
+                          instance_id=f"LOCAL-{code}")
+    # create_form 内部用自管会话(_db())并已关闭 → 返回 detached 实例；
+    # 重新拉入调用方会话，调用方对状态/字段的修改才能落库。
+    return db_session.get(type(created), created.id)
 
 
 def post_spy(monkeypatch) -> list[str]:

@@ -27,28 +27,37 @@ def _fn(name: str, description: str, props: dict, required: list[str]) -> dict:
 
 
 TOOLS_SCHEMA: list[dict] = [
+    # 参数只描述 dispatch 真实消费的内容——上下文对象(ctx.task)携带的信息不重复声明，
+    # 否则模型被迫编造 case_id/instance_id 之类永不被读取的假参数（schema 债）。
     _fn("list_pending_contract_approvals", "拉取待处理审批单列表",
         {"limit": {"type": "integer"}}, []),
-    _fn("get_contract_approval", "查询单个审批单详情",
-        {"instance_id": {"type": "string"}}, ["instance_id"]),
-    _fn("download_contract_attachment", "下载合同附件并返回本地路径与校验信息",
-        {"instance_id": {"type": "string"}, "attachment_id": {"type": "string"}},
-        ["instance_id"]),
-    _fn("parse_contract_document", "解析合同文档返回结构化字段",
-        {"document_id": {"type": "integer"}}, ["document_id"]),
-    _fn("run_contract_rules", "执行规则审查返回命中结果和风险结论",
-        {"case_id": {"type": "integer"}}, ["case_id"]),
-    _fn("save_review_result", "保存审查结果(总风险等级/摘要/关注点/评论全文)",
-        {"case_id": {"type": "integer"}, "overall_risk_level": {"type": "string",
+    _fn("get_contract_approval", "查看当前审批单详情：基本信息/表单字段/附件清单",
+        {}, []),
+    _fn("download_contract_attachment", "下载当前审批单的全部合同附件到本地存储",
+        {}, []),
+    _fn("parse_contract_document", "解析当前审批单的合同正文，产出结构化字段与条款",
+        {}, []),
+    _fn("run_contract_rules", "对当前审批单执行规则库初筛（参考线索，非结论）",
+        {}, []),
+    _fn("save_review_result", "保存你亲笔撰写的审查结果",
+        {"overall_risk_level": {"type": "string",
          "enum": ["high", "medium", "low"]},
          "summary_text": {"type": "string"},
          "focus_points_json": {"type": "array", "items": {"type": "string"}},
          "comment_text": {"type": "string"}},
-        ["case_id", "overall_risk_level", "summary_text", "focus_points_json",
-         "comment_text"]),
-    _fn("write_approval_comment", "将审查意见写回审批评论区",
-        {"instance_id": {"type": "string"}, "review_id": {"type": "integer"}},
-        ["instance_id", "review_id"]),
+        ["overall_risk_level", "comment_text"]),
+    _fn("write_approval_comment", "将已保存的审查意见写回审批单评论区（闭环终点，必调）",
+        {"review_id": {"type": "integer"}}, []),
+    _fn("submit_basic_info", "用合同原文核对解析结果后，修正基本信息"
+        "（甲方/乙方/金额/日期等）——AI 以原文为准，解析器只是初稿",
+        {"fields": {"type": "object",
+                    "description": "字段名→修正值，如 {\"party_a\":\"XX公司\",\"amount\":\"1,860,000\"}"}},
+        ["fields"]),
+    _fn("list_review_rules", "浏览公司规则库清单（AI 的参考线索工具：规则不是结论，"
+        "须回到合同原文独立核实）",
+        {"keyword": {"type": "string"}}, []),
+    _fn("search_contract_text", "在已解析的合同原文中按关键词定位条款原文（上下文有限时优先检索而非通读）",
+        {"keyword": {"type": "string"}}, ["keyword"]),
 ]
 
 
@@ -82,12 +91,14 @@ def execute_tool(ctx: RunContext, name: str, args: dict) -> str:
         if name == "list_pending_contract_approvals":
             result = fetcher.sync_pending_approvals(db, limit=int(args.get("limit", 20)))
         elif name == "get_contract_approval":
-            from app.services import mock_client
+            from app.services import approval_store   # 本地审批域（mock 已物理删除）
 
-            detail = mock_client.get_detail(task.instance_id)
+            detail = approval_store.get_detail(task.instance_id)
             result = {"approval_code": detail.get("approval_code"),
-                      "title": detail.get("approval_title"),
+                      "title": detail.get("title"),
+                      "applicant": detail.get("applicant"),
                       "form_data": detail.get("form_data"),
+                      "status": detail.get("status"),
                       "attachments": detail.get("attachments"),
                       "local_task_status": task.task_status}
         elif name == "download_contract_attachment":
@@ -125,19 +136,61 @@ def execute_tool(ctx: RunContext, name: str, args: dict) -> str:
             result = {"overall_risk_level": summary["overall_risk_level"],
                       "hits": summary["hits"], "focus_points": summary["focus_points"]}
         elif name == "save_review_result":
+            comment_text = args.get("comment_text")
+            if not comment_text or not str(comment_text).strip():
+                # 意见完全来自 AI：拒绝确定性文案兜底（用户 2026-08-28 产品规则）
+                raise ToolError(
+                    "VALIDATION_ERROR",
+                    "审查意见必须由AI亲笔撰写——请综合合同原文与参考线索完成意见后，"
+                    "以 comment_text 传入本工具保存")
+            # 风险枚举归一：模型常传中文「高/中/低」，落库前统一为 high/medium/low
+            _RISK_MAP = {"高": "high", "中": "medium", "低": "low",
+                         "high": "high", "medium": "medium", "low": "low"}
+            raw_level = str(args.get("overall_risk_level")
+                            or (ctx.rules_summary or {}).get("overall_risk_level", "")
+                            or "").strip()
+            level = _RISK_MAP.get(raw_level.lower(), None)
+            if level is None:
+                raise ToolError("VALIDATION_ERROR",
+                                f"overall_risk_level 必须是 高|中|低 或 high|medium|low，"
+                                f"收到: {raw_level!r}")
             summary = ctx.rules_summary or {}
             row = reviewer.save_result(
                 db, task,
-                overall_risk_level=args.get("overall_risk_level") or
-                summary.get("overall_risk_level", "low"),
+                overall_risk_level=level,
                 summary_text=args.get("summary_text") or
                 f"命中 {len(summary.get('hits', []))} 条规则。",
                 focus_points_json=args.get("focus_points_json") or
                 summary.get("focus_points", []),
-                comment_text=args.get("comment_text") or
-                reviewer.build_comment_text(summary, None))
+                comment_text=comment_text)
             ctx.review_id = row.id
             result = {"review_id": row.id}
+        elif name == "submit_basic_info":
+            from app.models import ContractParse
+
+            fields = args.get("fields") or {}
+            if not isinstance(fields, dict) or not fields:
+                raise ToolError("VALIDATION_ERROR", "fields 不能为空")
+            parse_row = (db.query(ContractParse).filter_by(task_id=task.id)
+                         .order_by(ContractParse.id.desc()).first())
+            if parse_row is None:
+                raise ToolError("PARSE_EMPTY", "请先解析合同，再修正基本信息")
+            _KNOWN = {"contract_title", "contract_no", "party_a", "party_b",
+                      "amount", "currency", "effective_date", "expire_date"}
+            info = dict(parse_row.basic_info_json or {})
+            updated = []
+            for k, v in fields.items():
+                if k not in _KNOWN or v is None or not str(v).strip():
+                    continue
+                info[k] = {"value": str(v).strip(), "pos": None,
+                           "status": "ai_verified"}
+                updated.append(k)
+            if not updated:
+                raise ToolError("VALIDATION_ERROR",
+                                f"没有可识别的字段名，可用: {sorted(_KNOWN)}")
+            parse_row.basic_info_json = info
+            db.commit()
+            result = {"updated": sorted(updated)}
         elif name == "write_approval_comment":
             if ctx.dry_run:
                 ctx.trace.append({"tool": name, "outcome": "dry_run_skip"})
@@ -164,6 +217,40 @@ def execute_tool(ctx: RunContext, name: str, args: dict) -> str:
             ctx.written = outcome.get("write_status") == "success"
             result = {"write_status": outcome.get("write_status"),
                       "deduped": outcome.get("deduped", False)}
+        elif name == "list_review_rules":
+            from app.models import ReviewRule
+
+            kw = (args.get("keyword") or "").strip()
+            rules = db.query(ReviewRule).filter(ReviewRule.rule_status == 1).all()
+            items = [{"code": r.rule_code, "name": r.rule_name,
+                      "risk_level": r.risk_level, "match_mode": r.match_mode,
+                      "match_text": r.match_text[:120],
+                      "suggestion": r.suggestion_text}
+                     for r in rules
+                     if not kw or kw in r.rule_name or kw in r.suggestion_text]
+            result = {"note": "规则库仅作参考线索——最终判断必须基于合同原文独立作出",
+                      "count": len(items), "rules": items[:20]}
+        elif name == "search_contract_text":
+            from app.models import ContractParse
+
+            kw = str(args.get("keyword") or "").strip()
+            if not kw:
+                raise ToolError("VALIDATION_ERROR", "keyword 不能为空")
+            parse_row = (db.query(ContractParse).filter_by(task_id=task.id)
+                         .order_by(ContractParse.id.desc()).first())
+            if parse_row is None or not parse_row.raw_text:
+                raise ToolError("PARSE_EMPTY", "请先解析合同，再检索条款原文")
+            low, kl = parse_row.raw_text.lower(), kw.lower()
+            matches, start = [], 0
+            while len(matches) < 8:
+                idx = low.find(kl, start)
+                if idx < 0:
+                    break
+                matches.append({
+                    "position": f"offset:{idx}",
+                    "snippet": parse_row.raw_text[max(0, idx - 40): idx + len(kw) + 120]})
+                start = idx + len(kw)
+            result = {"keyword": kw, "count": len(matches), "matches": matches}
         else:
             raise ToolError("UNKNOWN_TOOL", f"未注册工具: {name}")
         ctx.trace.append({"tool": name, "outcome": "ok"})

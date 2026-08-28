@@ -5,6 +5,9 @@
 """
 from __future__ import annotations
 
+import threading
+import uuid
+
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, \
     UploadFile
 from fastapi.responses import FileResponse
@@ -171,22 +174,63 @@ def diag_llm() -> dict:
                 "error": f"{type(exc).__name__}: {exc}"[:300]}
 
 
-def _run_batch(ids: list[int]) -> None:
-    """批量送审工人：顺序执行，任何异常都被吞掉并在该任务的运行记录/状态中留痕。"""
+def _run_batch(batch_id: str, ids: list[int]) -> None:
+    """批量送审工人：顺序执行；启动先自愈孤儿任务，任何异常把该单显式转 blocked。
+
+    进度记账在 _BATCHES：前端轮询 /app/batch/{batch_id} 拿真实账本，
+    杜绝「前端说完毕、GPU 还在跑」的体验裂隙。
+    """
+    import threading
+    import uuid
+
     from app.db import SessionLocal
-    from app.services.agent_loop import RunController
+    from app.services.state_machine import block_task, recover_interrupted
+
+    s0 = SessionLocal()
+    try:
+        recover_interrupted(s0)   # 先治历史卡死单（parsing/reviewing 孤儿 → blocked）
+    finally:
+        s0.close()
 
     for tid in ids:
         s = SessionLocal()
+        task = None
         try:
             task = s.query(ApprovalTask).filter_by(id=tid).one_or_none()
             if task is None:
                 continue
-            RunController(s, task).start()
-        except Exception:  # noqa: BLE001 —— 批量工人绝不向上抛
+            from app.services import engine as engine_module
+
+            if not engine_module.try_acquire(tid):   # 该单已在别处运行
+                with _BATCH_LOCK:
+                    _BATCHES[batch_id]["skipped"] += 1
+                continue
+            try:
+                if task.task_status == "blocked":
+                    # blocked 单进批次 = 重试语义：复位后再跑（缺附件由 retry_task 拒绝）
+                    from app.services.state_machine import retry_task
+
+                    retry_task(s, task)
+                from app.services.engine import run_full_cycle
+                from app.services.run_trace import record_tool_trace
+
+                result = run_full_cycle(s, task)
+                record_tool_trace(s, task, result.get("trace"))
+            finally:
+                engine_module.release(tid)
+            with _BATCH_LOCK:
+                _BATCHES[batch_id]["done"] += 1
+        except Exception as exc:  # noqa: BLE001 —— 吞异常可以，吞状态不行
+            if task is not None:
+                block_task(s, task, "LLM_RUN_FAILED",
+                           f"批量运行失败已安全停机：{exc}"[:300])
             continue
         finally:
             s.close()
+
+
+_BATCH_LOCK = threading.Lock()
+_BATCHES: dict[str, dict] = {}
 
 
 @router.post("/batch_review")
@@ -198,5 +242,20 @@ def batch_review(payload: dict,
         from fastapi import HTTPException
 
         raise HTTPException(422, "task_ids 为空")
-    background_tasks.add_task(_run_batch, ids)
-    return {"accepted": len(ids), "note": "后台顺序执行中，请轮询 /app/queue"}
+    batch_id = uuid.uuid4().hex[:12]
+    with _BATCH_LOCK:
+        _BATCHES[batch_id] = {"total": len(ids), "done": 0, "skipped": 0}
+    background_tasks.add_task(_run_batch, batch_id, ids)
+    return {"batch_id": batch_id, "accepted": len(ids),
+            "note": "后台逐张处理中（每张约 30~60 秒），轮询 /app/batch/{batch_id}"}
+
+
+@router.get("/batch/{batch_id}")
+def batch_status(batch_id: str) -> dict:
+    from fastapi import HTTPException
+
+    with _BATCH_LOCK:
+        snap = dict(_BATCHES.get(batch_id, {}))
+    if not snap:
+        raise HTTPException(404, "批次不存在")
+    return {"batch_id": batch_id, **snap}

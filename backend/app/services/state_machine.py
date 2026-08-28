@@ -15,7 +15,7 @@ ALLOWED: dict[str, set[str]] = {
     "parsing": {"reviewing", "blocked"},
     "reviewing": {"done", "blocked"},
     "blocked": {"parsing", "reviewing"},   # retry 回溯
-    "done": set(),
+    "done": {"parsing"},                   # 再次审查：已完成单可一键复检（C端刚需）
 }
 
 
@@ -66,7 +66,11 @@ def retry_task(db: Session, task: ApprovalTask) -> str:
 
 
 def recover_interrupted(db: Session) -> int:
-    """启动自愈：进程曾中断导致卡在 parsing/reviewing 的孤儿任务 → blocked（人话原因）。"""
+    """启动自愈：卡在 parsing/reviewing 且无在途工人的任务 → blocked。
+
+    原因标注只陈述可观察事实（上次运行未完成），不虚构具体成因——
+    无论是进程重启打断还是模型自弃闭环，落到用户面前都是同一句实话。
+    """
     from app.models import AgentRun
 
     running_ids = {r.task_id for r in db.query(AgentRun)
@@ -78,7 +82,8 @@ def recover_interrupted(db: Session) -> int:
         if t.id in running_ids:
             continue
         ok = transition(db, t, "blocked",
-                        block_reason="系统维护中断，处理未完成——请点击重新处理")
+                        block_reason="上次运行未完成——任务已冻结待人工恢复"
+                                     "（可能因进程重启或运行中断），请点击重新处理")
         if ok:
             fixed += 1
             db.add(TaskLog(task_id=t.id, log_level="warn", log_type="agent",

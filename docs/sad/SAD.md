@@ -1,5 +1,8 @@
 # 软件架构文档（SAD）— 合同审批审查 Agent
 
+> [!NOTE]
+> 本文描述 **main v1.x 基线**。分支 feat/langchain-react-gpu-only（V2：LangChain ReAct、十工具、零降级、重试即真跑引擎等）的行为差异以 [V2分支现状.md](../V2分支现状.md) 为准，冲突处以该文档为准。
+
 | 项 | 内容 |
 |----|------|
 | 版本 | v1.1（对齐复核修订） |
