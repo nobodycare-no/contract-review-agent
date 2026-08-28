@@ -259,14 +259,15 @@ def batch_review(payload: dict,
         from fastapi import HTTPException
 
         raise HTTPException(422, "task_ids 为空")
-    # 点击瞬间即排队：选中的待处理单同步置「排队中」——
-    # 用户立刻在列表里看到整批被受理，而不是干等工人跑到才变化（UX 反馈 2026-08-28）
+    # 点击瞬间即排队：选中的待处理单/已完成单同步置「排队中」——
+    # done 单进批次若不排队，工具链的 advance_to 从 done 全是空转，
+    # 重审真实在跑状态却钉死「已完成」（用户实测缺陷）——必须先迁移才有可见流转
     from app.services.state_machine import transition
 
     queued = 0
     for tid in ids:
         task = db.query(ApprovalTask).filter_by(id=tid).one_or_none()
-        if task is not None and task.task_status == "pending" \
+        if task is not None and task.task_status in ("pending", "done") \
                 and transition(db, task, "queued"):
             queued += 1
     batch_id = uuid.uuid4().hex[:12]

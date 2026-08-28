@@ -139,3 +139,44 @@ def test_recovery_heals_queued_to_pending(db_session):
     assert recover_interrupted(db_session, heal_queued=True) >= 1
     db_session.expire_all()
     assert t.task_status == "pending"
+
+
+def test_batch_rereviews_done_task_with_visible_flow(client, db_session, monkeypatch):
+    """批量重审已 done 的单：点击即排队 → parsing → 重新 done，状态全程可见。
+
+    用户实测缺陷：批量里再次审查已完成合同，状态一直钉在「已完成」——
+    因为 done 单进批次既不排队也不迁移，工具链的 advance_to 从 done 全是空转，
+    重审真实在跑却对用户完全隐形。"""
+    from tests.factory import make_form
+
+    import app.services.lc_agent as lc_module
+    from app.services.state_machine import transition
+
+    monkeypatch.setenv("AGENT_ENGINE", "langchain")
+
+    seen: dict = {}
+
+    def fake(db, task, *, dry_run=False):
+        seen["status_at_run"] = task.task_status   # 工人开跑瞬间的状态
+        return _stub_run_lc()(db, task)
+
+    monkeypatch.setattr(lc_module, "run_lc", fake)
+
+    t = make_form(db_session, code="AP-R-001")
+    for step in ("queued", "parsing", "reviewing", "done"):
+        assert transition(db_session, t, step)
+    assert t.task_status == "done"
+
+    resp = client.post("/app/batch_review", json={"task_ids": [t.id]})
+    body = resp.json()
+    assert body["queued"] == 1, f"done 单应点击即排队：{body}"
+
+    # TestClient 在响应前同步跑完工人——中间态由桩捕获：
+    # 走过排队流程则工人开跑时必为 parsing；缺陷未修则是 done 直跑（状态全程钉死已完成）
+    assert seen.get("status_at_run") == "parsing", \
+        f"工人开跑时状态={seen.get('status_at_run')}——done 单没有经过排队迁移"
+
+    status = client.get(f"/app/batch/{body['batch_id']}").json()
+    assert status["done"] == 1
+    db_session.expire_all()
+    assert t.task_status == "done"   # 重审闭环后再次完成

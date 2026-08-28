@@ -16,7 +16,7 @@ ALLOWED: dict[str, set[str]] = {
     "parsing": {"reviewing", "blocked"},
     "reviewing": {"done", "blocked"},
     "blocked": {"parsing", "reviewing"},   # retry 回溯
-    "done": {"parsing"},                   # 再次审查：已完成单可一键复检（C端刚需）
+    "done": {"parsing", "queued"},         # 再次审查：一键复检（C端刚需）；批量重审走排队
 }
 
 
