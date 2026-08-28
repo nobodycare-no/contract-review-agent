@@ -66,7 +66,7 @@ import { useRoute } from 'vue-router'
 import { api } from '../api'
 const d=ref(null), logs=ref([])
 const LEVEL={high:'高风险',medium:'中风险',low:'低风险'}
-const STATUS={pending:'待处理',parsing:'正在解析',reviewing:'正在审查',blocked:'需人工处理',done:'已完成'}
+const STATUS={pending:'待处理',parsing:'AI 审查中',reviewing:'AI 审查中',blocked:'需人工处理',done:'已完成'}
 const WRITE={not_written:'尚未生成',writing:'写入中…',success:'已写入评论区',failed:'写入失败'}
 const LOG_ZH={tool:'工具调用',agent:'Agent 动作',write:'意见写入',system:'系统',transition:'状态迁移'}
 const ZH={contract_title:'合同名称',contract_no:'合同编号',party_a:'甲方(己方)',party_b:'乙方(对方)',

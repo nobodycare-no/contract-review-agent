@@ -36,7 +36,7 @@
           <td><input type="checkbox" :value="t.id" v-model="selectedIds"/></td>
           <td><router-link :to="`/detail/${t.id}`" style="color:var(--ac)">{{ t.title }}</router-link></td>
           <td>{{ t.applicant }}</td>
-          <td><span :class="'pill p-'+t.task_status" :title="t.block_reason||''">{{ statusZh(t.task_status) }}</span></td>
+          <td><span :class="'pill ' + pillCls(t)" :title="t.block_reason||''">{{ statusZh(t.task_status) }}</span></td>
           <td><span v-if="t.overall_risk_level" :class="'pill lv-'+t.overall_risk_level">{{ LEVEL[t.overall_risk_level] }}</span><span v-else class="pill lv-none">未评估</span></td>
           <td><span :class="'pill p-'+t.write_status">{{ WRITE[t.write_status] }}</span></td>
         </tr>
@@ -49,10 +49,12 @@
 import { onMounted, ref, computed } from 'vue'
 import { api } from '../api'
 
-const STATUS={pending:'待处理',parsing:'正在解析',reviewing:'正在审查',blocked:'需人工处理',done:'已完成'}
+const STATUS={pending:'待处理',parsing:'AI 审查中',reviewing:'AI 审查中',blocked:'需人工处理',done:'已完成'}
 const WRITE ={not_written:'尚未生成',writing:'写入中…',success:'已写入评论区',failed:'写入失败'}
 const LEVEL ={high:'高风险',medium:'中风险',low:'低风险'}
 const statusZh=s=>STATUS[s]||s
+// parsing/reviewing 是内部工程状态（自愈锚点/CAS锁），对用户统一呈现为「AI 审查中」
+const pillCls=t=>['parsing','reviewing'].includes(t.task_status)?'p-reviewing':'p-'+t.task_status
 
 const title=ref(''), applicant=ref('王铁柱'), bundle=ref(false)
 const pickedFiles=ref([]), uploading=ref(false)
