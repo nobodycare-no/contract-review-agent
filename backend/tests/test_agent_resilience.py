@@ -79,6 +79,25 @@ def test_lc_agent_toolbelt_expanded():
     assert len(tools) == 8
 
 
+def test_get_contract_approval_uses_local_domain(db_session):
+    """模型自主决策最爱先查单据——此工具必须接本地审批域，不得再依赖已删除的 mock。"""
+    import json as _json
+
+    from tests.factory import make_form
+
+    from app.tools_registry import RunContext, execute_tool
+
+    task = make_form(db_session)
+    ctx = RunContext(db=db_session, task=task)
+
+    out = execute_tool(ctx, "get_contract_approval", {})
+
+    data = _json.loads(out)
+    assert "error_code" not in data, data
+    assert data["approval_code"] == task.approval_code
+    assert data["attachments"], "附件清单不应为空"
+
+
 def test_save_review_result_rejects_silent_comment_fallback(db_session):
     from tests.factory import make_form
 

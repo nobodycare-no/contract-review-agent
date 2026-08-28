@@ -87,12 +87,14 @@ def execute_tool(ctx: RunContext, name: str, args: dict) -> str:
         if name == "list_pending_contract_approvals":
             result = fetcher.sync_pending_approvals(db, limit=int(args.get("limit", 20)))
         elif name == "get_contract_approval":
-            from app.services import mock_client
+            from app.services import approval_store   # 本地审批域（mock 已物理删除）
 
-            detail = mock_client.get_detail(task.instance_id)
+            detail = approval_store.get_detail(task.instance_id)
             result = {"approval_code": detail.get("approval_code"),
-                      "title": detail.get("approval_title"),
+                      "title": detail.get("title"),
+                      "applicant": detail.get("applicant"),
                       "form_data": detail.get("form_data"),
+                      "status": detail.get("status"),
                       "attachments": detail.get("attachments"),
                       "local_task_status": task.task_status}
         elif name == "download_contract_attachment":
