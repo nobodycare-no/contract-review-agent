@@ -23,12 +23,13 @@ def create_app() -> FastAPI:
     app = FastAPI(title="contract-review-agent", version="1.3.0")
     app.state.llm_probe_cache: dict = {"ts": 0.0, "ok": None}  # type: ignore[attr-defined]
 
-    # 启动自愈：清理曾因维护/重启而卡死在中间态的任务（用户可见为"需人工处理"）
+    # 启动自愈：清理曾因维护/重启而卡死在中间态的任务（用户可见为"需人工处理"）；
+    # 从未开跑的排队单诚实回待处理（heal_queued——它们没被工人碰过）
     try:
         from app.services.state_machine import recover_interrupted
 
         with SessionLocal() as _db0:
-            healed = recover_interrupted(_db0)
+            healed = recover_interrupted(_db0, heal_queued=True)
     except Exception:  # noqa: BLE001 —— 表未建好等测试场景静默
         healed = 0
 

@@ -42,6 +42,7 @@ tbody tr:last-child td{border-bottom:none}
 tr.row{cursor:pointer;transition:background .12s}tr.row:hover{background:#f2f6ff}
 .pill{display:inline-block;padding:3px 12px;border-radius:20px;font-size:12px;font-weight:700}
 .p-pending,.p-not_written{background:#eceff5;color:#55617e}
+.p-queued{background:#f3ecfd;color:#6b46c1}
 .p-parsing{background:#e3edfc;color:#2b62c8}.p-reviewing{background:#fdf1dc;color:#9a6b06}
 .p-blocked,.p-failed{background:#fde8e8;color:#c0343a}.p-done,.p-success{background:#e2f4ea;color:#1d7a4c}
 .lv-high{background:#fde8e8;color:#c0343a}.lv-medium{background:#fdf1dc;color:#9a6b06}
