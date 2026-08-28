@@ -222,6 +222,7 @@ def _run_batch(batch_id: str, ids: list[int]) -> None:
                 _BATCHES[batch_id]["done"] += 1
         except Exception as exc:  # noqa: BLE001 —— 吞异常可以，吞状态不行
             if task is not None:
+                s.rollback()   # 损坏事务先复位，否则 block_task 自身会炸
                 block_task(s, task, "LLM_RUN_FAILED",
                            f"批量运行失败已安全停机：{exc}"[:300])
             continue

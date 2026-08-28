@@ -167,11 +167,24 @@ def run_lc(db_session: Session, task: ApprovalTask, *, dry_run: bool = False) ->
 
     import time
 
+    from langgraph.errors import GraphRecursionError
+
     started = time.monotonic()
-    raw = agent.invoke(
-        {"messages": [("user", brief)]},
-        config={"recursion_limit": max(16, int(s.agent_max_steps) * 2)},
-    )
+    try:
+        raw = agent.invoke(
+            {"messages": [("user", brief)]},
+            config={"recursion_limit": max(16, int(s.agent_max_steps) * 2)},
+        )
+    except GraphRecursionError:
+        # 递归上限耗尽（真机 2026-08-28：小模型偶发工具震荡）——
+        # 新开精简线程给一次明确收尾的纠偏轮，仍由模型决策；再失败照常掀桌。
+        raw = agent.invoke(
+            {"messages": [("user", brief + "\n\n你此前多次调用工具仍未完成闭环。"
+                           "现在立即收尾：若尚未保存结果先调用 save_review_result，"
+                           "然后必须调用 write_approval_comment 完成写回；"
+                           "不要再调用其他工具。")]},
+            config={"recursion_limit": max(8, int(s.agent_max_steps))},
+        )
     elapsed_ms = int((time.monotonic() - started) * 1000)
     messages = raw.get("messages", [])
 

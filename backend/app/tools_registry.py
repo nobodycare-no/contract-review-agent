@@ -260,7 +260,8 @@ def execute_tool(ctx: RunContext, name: str, args: dict) -> str:
         return _clip({"error_code": exc.code, "message": str(exc),
                       "retriable": exc.retriable})
     except Exception as exc:  # noqa: BLE001 —— 工具异常回填自纠，不终止循环
-        ctx.trace.append({"tool": name, "outcome": "EXC"})
+        # 轨迹必须带原因：只记 EXC 等于让故障永远匿名（真机 2026-08-28 教训）
+        ctx.trace.append({"tool": name, "outcome": f"EXC:{str(exc)[:120]}"})
         return _clip({"error_code": "TOOL_EXCEPTION", "message": str(exc)[:300]})
 
 
