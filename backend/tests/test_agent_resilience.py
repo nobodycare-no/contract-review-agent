@@ -234,6 +234,68 @@ def test_recover_reason_states_only_the_fact(db_session):
     assert "维护中断" not in (task.block_reason or "")   # 不许虚构原因
 
 
+def test_write_comment_dedup_still_closes_state(db_session):
+    """幂等写回守卫短路时也必须把状态闭环到 done——否则成功轮会被自愈误标 blocked。"""
+    from datetime import datetime
+
+    from tests.factory import make_form
+
+    from app.models import CommentLog, ReviewResult
+    from app.services.reviewer import write_comment
+
+    task = make_form(db_session)
+    task.task_status = "reviewing"   # 重审复位后的在途态
+    task.write_status = "success"    # 上一轮已成功写回
+    db_session.commit()
+    review = ReviewResult(task_id=task.id, overall_risk_level="low",
+                          summary_text="s", focus_points_json=[],
+                          comment_text="c")
+    db_session.add(review)
+    db_session.commit()
+
+    outcome = write_comment(db_session, task, review)
+
+    assert outcome["deduped"] is True
+    db_session.refresh(task)
+    assert task.task_status == "done", f"去重短路后状态必须闭环: {task.task_status}"
+
+
+def test_run_lc_repairs_missing_write_once_then_fails_loud(db_session, monkeypatch):
+    """模型漏写回时给一次显式纠偏轮（仍是模型决策），仍失败则如实掀桌。"""
+    from tests.factory import make_form
+
+    task = make_form(db_session)
+    monkeypatch.setenv("AGENT_ENGINE", "langchain")
+    monkeypatch.setenv("LLM_BASE_URL", "http://127.0.0.1:9/v1")
+
+    calls = []
+
+    def fake_create_agent(model, tools, system_prompt=None, **kw):
+        tmap = {t.name: t for t in tools}
+
+        class _FakeAgent:
+            def invoke(self, inp, config=None):
+                calls.append(inp)
+                if len(calls) == 1:   # 第一轮：保存了结果，但漏了写回
+                    tmap["save_review_result"].invoke({
+                        "overall_risk_level": "low", "summary_text": "s",
+                        "focus_points_json": [], "comment_text": "AI 亲笔意见"})
+                return {"messages": [*inp["messages"], {"content": "收到。"}]}
+
+        return _FakeAgent()
+
+    import langchain.agents as lc_agents
+    monkeypatch.setattr(lc_agents, "create_agent", fake_create_agent)
+
+    from app.services.lc_agent import run_lc
+
+    with pytest.raises(RuntimeError, match="闭环"):
+        run_lc(db_session, task)
+
+    assert len(calls) == 2, f"应有一次纠偏轮: {len(calls)}"
+    assert "write_approval_comment" in str(calls[1]["messages"][-1])
+
+
 def test_save_review_result_rejects_silent_comment_fallback(db_session):
     from tests.factory import make_form
 

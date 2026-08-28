@@ -39,7 +39,8 @@ SYSTEM_PROMPT = (
     "【规则库定位】规则是给 AI 的检索工具，不是结论：命中与建议仅作参考线索，"
     "你必须回到合同原文逐条核实，结合自身常识独立判断。\n"
     "【意见要求】最终审查意见完全由你撰写：引用条款原文佐证，指出风险并给出可执行建议。"
-    "评论文本第一行必须是『总风险等级：高|中|低』，全程中文。\n"
+    "评论文本第一行必须是『总风险等级：高|中|低』，全程中文。"
+    "无论前面发生什么，最后一步必须调用 write_approval_comment 完成写回——未写回即任务失败。\n"
     "【模型自觉】你是 8B 级本地模型：上下文有限，不要试图一次读完整份合同，"
     "善用检索工具定位关键条款；不确定就如实说明，禁止编造条款原文。"
 )
@@ -168,15 +169,27 @@ def run_lc(db_session: Session, task: ApprovalTask, *, dry_run: bool = False) ->
     )
     messages = raw.get("messages", [])
 
-    # 闭环验证：图跑完≠闭环。工具连败后模型自弃、没写回意见就返回 succeeded
-    # 是假成功（真机 141 号单事故）——零容忍，如实掀桌转人工。
+    def _closed() -> bool:
+        return bool(ctx.review_id) if dry_run else bool(ctx.written)
+
+    # 修复轮：模型漏写回但已保存结果 → 显式纠偏一次（仍是模型决策，轨迹如实记账）
+    if not _closed() and not dry_run and ctx.review_id:
+        repair = agent.invoke(
+            {"messages": [*messages,
+             ("user", "你还没有把审查意见写回审批单评论区——没有写回即任务失败。"
+                      "请立即调用 write_approval_comment 完成写回，不要再输出总结文字。")]},
+            config={"recursion_limit": max(8, int(s.agent_max_steps))})
+        messages = repair.get("messages", messages)
+
+    # 闭环验证：图跑完≠闭环。未保存/未写回就返回 succeeded 是假成功——零容忍。
     if dry_run:
         closed, missing = bool(ctx.review_id), "审查结果未保存"
     else:
         closed, missing = bool(ctx.written), "审查意见未写回审批单"
     if not closed:
-        raise RuntimeError(
-            f"AI 未完成审查闭环（{missing}）——禁止假成功，任务如实转人工")
+        tail = " → ".join(f"{i['tool']}({i['outcome']})" for i in ctx.trace[-5:]) \
+               or "（一次工具都没调用）"
+        raise RuntimeError(f"AI 未完成审查闭环（{missing}）——轨迹尾部: {tail}")
 
     return {"status": "succeeded", "steps": len(messages),
             "raw_output": _final_text(messages)[:600],
