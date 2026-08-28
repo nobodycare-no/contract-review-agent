@@ -25,12 +25,12 @@ graph TB
     end
 
     DB[("MySQL 8<br/>八表事实源 + task_logs 留痕")]
-    Q["Qwen3-8B @ vLLM<br/>AutoDL :8443(原生tools)"]
+    Q["GLM glm-5.3-flash @ BigModel<br/>OpenAI 兼容 tools API"]
     APP --> DB
     LC -->|"OpenAI 兼容 tools API"| Q
 ```
 
-**信任边界**：管理面 Admin Token；Agent 对外仅访问 vLLM；审批域为本系统自有业务表（V1 起 mock 物理删除）。
+**信任边界**：管理面 Admin Token；Agent 对外仅访问 BigModel HTTPS 端点（APIKey 走环境变量，不进代码）；审批域为本系统自有业务表（V1 起 mock 物理删除）。
 
 ## 2. 架构决策记录（ADR）
 
@@ -50,7 +50,7 @@ approval_store 网关保持原签名——「回写=真实业务写入」的语�
 ### ADR-B6 认证模型 — 保留（Admin Token 常量时间比较）
 
 ### ADR-B7 ~~双通道 Function-Calling~~ → 已废止 v2.0
-LangChain create_agent 仅走 vLLM 原生 tools；JSON 协议降级通道移除。
+LangChain create_agent 仅走 OpenAI 兼容原生 tools；JSON 协议降级通道移除。
 
 ### ADR-B8 RunController（事件溯源/三维预算/断点恢复/熔断）→ legacy 车道专属
 代码保留于 agent_loop.py 供 `AGENT_ENGINE=legacy` 对比；LC 主车道以**闭环闸门+纠偏轮+同单互斥**承接其稳定性诉求。
@@ -65,7 +65,8 @@ LLM 不可用/闭环未完成 → 异常上抛 → 502 → 任务 blocked（人�
 
 ### ADR-C2 LangChain 官方 Agent 选型
 市场成熟方案 `langchain.agents.create_agent`（LangGraph 引擎）；自研调度循环退役。
-模型无关：换模型仅需改 `LLM_MODEL` 与 vLLM 启动参数。
+模型无关：换 OpenAI 兼容模型仅需改 `.env` 的 `LLM_BASE_URL/LLM_API_KEY/LLM_MODEL`。
+（本分支实证切换：qwen3-8B@vLLM → glm-5.3-flash@BigModel，代码零改动，仅配置与提示词微调。）
 
 ### ADR-C3 闭环闸门与纠偏轮
 图跑完≠闭环。未写回即 RuntimeError（附轨迹尾巴）；已保存未写回 → 追加一轮显式纠偏
@@ -90,6 +91,7 @@ batch_id 账本（done/skipped）替代「活动状态启发式」；响应携�
 ## 4. 部署视图
 
 - 本地/生产同构：双容器（mysql + app :18000 唯一入口），`TZ=Asia/Shanghai`。
-- LLM：AutoDL vLLM 公网映射 → `LLM_BASE_URL`；**GPU 关机=审查任务 blocked（零降级）**，
-  启动参数与自检见 deploy/GPU_VLLM_START.md（必须 `--enable-auto-tool-choice --tool-call-parser hermes`）。
+- LLM：智谱 BigModel OpenAI 兼容端点（GLM）→ `LLM_BASE_URL/LLM_API_KEY/LLM_MODEL`；
+  **LLM 不可达=审查任务 blocked（零降级）**。本地 GPU vLLM 备选路径见
+  deploy/GPU_VLLM_START.md（必须 `--enable-auto-tool-choice --tool-call-parser hermes`）。
 - 操作规程见 docs/部署手册.md。

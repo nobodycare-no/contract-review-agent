@@ -1,14 +1,16 @@
 # contract-review-agent · 合同审批审查 Agent
 
-> **分支 feat/langchain-react-gpu-only（V2）**：LangChain 官方 Agent（LangGraph 引擎）× 十工具 × **零降级**
+> **分支 feat/cloud-glm53flash（V2 云端模型版）**：LangChain 官方 Agent（LangGraph 引擎）× 十工具 × **零降级**
 > —— 合同风险自动审查并回写审批评论区（《大模型项目实战》§2.4）。
+> 推理端点=智谱 BigModel OpenAI 兼容端点 **GLM glm-5.3-flash**（本地 GPU vLLM 为备选路径）。
 
 ## V2 核心事实（与 main v1.x 的差异见 [docs/V2分支现状.md](docs/V2分支现状.md)）
 
 | 维度 | V2 现状 |
 |------|---------|
-| 引擎 | `langchain.agents.create_agent`（底层 LangGraph），vLLM OpenAI 兼容原生 tools |
-| 工具 | **10 个**：九业务工具 + 规则初筛；签名以 ctx 驱动，schema 只声明真实消费的参数 |
+| 引擎 | `langchain.agents.create_agent`（底层 LangGraph），OpenAI 兼容原生 tools（BigModel GLM） |
+| 模型 | `glm-5.3-flash`（始终思考型：档位 low/high/max，不支持关闭）；思考档位经 `LLM_THINKING` 仅作用于 Agent 主线 |
+| 工具 | **10 个**：九业务工具 + 规则初筛；签名以 ctx 驱动，schema 只声明真实消费的参数；并行工具调用按 ctx 串行化（共享 Session 保护） |
 | 降级 | **不存在**。LLM 失败/闭环未完成 → 异常上抛 → 任务显式 blocked（人话原因 + 轨迹尾部） |
 | 闭环闸门 | 图跑完≠闭环：未写回审批评论 = 任务失败，绝不返回假成功 |
 | 同单互斥 | 双击/批量并发第二请求 409 拒绝；成功后释放 |
@@ -20,17 +22,18 @@
 ## 快速启动
 
 ```bash
-cp deploy/.env.example .env       # 填 GPU 的 LLM_BASE_URL / LLM_MODEL
+cp deploy/.env.example .env       # 填 BigModel 的 LLM_API_KEY（z.ai / 智谱开放平台）
 cd deploy && docker compose up -d --build
-# GPU 侧 vLLM 启动参数与 30 秒自检：deploy/GPU_VLLM_START.md（必须含
+# 本地 GPU vLLM 备选路径：deploy/GPU_VLLM_START.md（必须含
 # --enable-auto-tool-choice --tool-call-parser hermes，否则一切工具调用 400）
 ```
 
 ## 验证
 
 ```bash
-cd backend && python -m pytest tests -q        # 87 passed, 2 skipped(真机用例 LC_LIVE=1)
+cd backend && python -m pytest tests -q        # 101 passed, 2 skipped(真机用例 LC_LIVE=1)
 # 真机闭环：前台 :18000 上传合同 → AI 审查 → 详情页看留痕时间线与服务端耗时
+# GLM 真机参考值：单合同全闭环约 2.5~4.5 分钟、27~33 步、17~19 轮工具调用（全部 ok）
 ```
 
 ## 文档

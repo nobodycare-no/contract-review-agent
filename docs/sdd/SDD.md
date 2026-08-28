@@ -26,13 +26,13 @@ backend/app/
 │   ├── ai_reviewer.py      AI 裁量增量层（ADR-B10）
 │   ├── state_machine.py    CAS 迁移 + blocked/retry + 启动自愈
 │   ├── run_trace.py        工具轨迹落库 task_logs(type=tool)
-│   ├── llm_client.py       httpx vLLM 访问（AI 审查层用）
+│   ├── llm_client.py       httpx OpenAI 兼容访问（AI 审查层用；max_tokens 3000 防思考截断）
 │   ├── agent_loop.py       （legacy 车道）RunController，非交付面
 │   └── tool_errors.py      ToolError 错误分类学
 ├── core/{config,obs}.py    环境变量集中配置 · JSON日志+Prometheus
 ├── acceptance/probe.py     V2 探针（11 项，真实栈取证）
 ├── models/                 八表规范 ORM（+agent_runs legacy 保留）
-└── tests/                  88 用例（LC_LIVE=1 门控真机用例）
+└── tests/                  103 用例（LC_LIVE=1 门控真机用例）
 
 web/                        Vue3 + Vite（Portal/Detail/Admin），构建产物由 app 同源托管
 deploy/                     docker-compose(TZ=Asia/Shanghai) · GPU_VLLM_START.md · mysql/init DDL
@@ -45,7 +45,7 @@ sequenceDiagram
     participant C as 调用端(Web/API)
     participant A as /agent/run（同单互斥）
     participant L as LangGraph ReAct
-    participant Q as Qwen3-8B(vLLM)
+    participant Q as GLM glm-5.3-flash(BigModel)
     participant T as 十工具包络
     participant S as 状态机/审批域
 

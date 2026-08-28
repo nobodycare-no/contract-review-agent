@@ -1,6 +1,8 @@
 # GPU 实例操作卡：vLLM 工具调用模式启动 · 验收 · 观测
 
-> 分支 feat/langchain-react-gpu-only 的真机前提。
+> **本分支（feat/cloud-glm53flash）默认走智谱 BigModel 云端 GLM，此卡为本地 GPU 备选路径**——
+> 想切回本地推理时：按本卡启动 vLLM，再把 `.env` 的 `LLM_BASE_URL/LLM_API_KEY/LLM_MODEL`
+> 三项改回 vLLM 端点即可，代码零改动。
 > 系统侧对 LLM **零降级零静默**：环境不对就显式报错，不存在「看似成功」的假象。
 
 ## 一、为什么必须带这两个启动参数

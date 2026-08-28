@@ -12,7 +12,7 @@ import pytest
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("LC_LIVE"),
-    reason="真机验证专用：设 LC_LIVE=1 且 GPU/vLLM 可达才运行")
+    reason="真机验证专用：设 LC_LIVE=1 且 LLM 端点可达才运行")
 
 
 def test_react_full_loop_on_real_llm(db_session, monkeypatch):
