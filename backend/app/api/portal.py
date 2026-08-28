@@ -174,17 +174,62 @@ def diag_llm() -> dict:
                 "error": f"{type(exc).__name__}: {exc}"[:300]}
 
 
-def _run_batch(batch_id: str, ids: list[int]) -> None:
-    """批量送审工人：顺序执行；启动先自愈孤儿任务，任何异常把该单显式转 blocked。
+def _run_one(batch_id: str, tid: int) -> None:
+    """单张工人：从排队中开跑，任何异常把该单显式转 blocked。
 
-    进度记账在 _BATCHES：前端轮询 /app/batch/{batch_id} 拿真实账本，
-    杜绝「前端说完毕、GPU 还在跑」的体验裂隙。
+    原顺序循环体拆出成单任务函数——批量工人按 BATCH_CONCURRENCY 并行调度，
+    每张独立线程+独立会话；同单互斥仍由 engine.try_acquire 把守。
     """
-    import threading
-    import uuid
+    from app.db import SessionLocal
+    from app.services import engine as engine_module
+    from app.services.run_trace import record_tool_trace
+    from app.services.state_machine import block_task, retry_task, transition
+
+    s = SessionLocal()
+    task = None
+    try:
+        task = s.query(ApprovalTask).filter_by(id=tid).one_or_none()
+        if task is None:
+            return
+        if not engine_module.try_acquire(tid):   # 该单已在别处运行
+            with _BATCH_LOCK:
+                _BATCHES[batch_id]["skipped"] += 1
+            return
+        try:
+            if task.task_status == "queued":
+                transition(s, task, "parsing")   # 开跑：排队中 → AI 审查中
+            elif task.task_status == "blocked":
+                # blocked 单进批次 = 重试语义：复位后再跑（缺附件由 retry_task 拒绝）
+                retry_task(s, task)
+            from app.services.engine import run_full_cycle
+
+            result = run_full_cycle(s, task)
+            record_tool_trace(s, task, result.get("trace"))
+        finally:
+            engine_module.release(tid)
+        with _BATCH_LOCK:
+            _BATCHES[batch_id]["done"] += 1
+    except Exception as exc:  # noqa: BLE001 —— 吞异常可以，吞状态不行
+        if task is not None:
+            s.rollback()   # 损坏事务先复位，否则 block_task 自身会炸
+            block_task(s, task, "LLM_RUN_FAILED",
+                       f"批量运行失败已安全停机：{exc}"[:300])
+    finally:
+        s.close()
+
+
+def _run_batch(batch_id: str, ids: list[int]) -> None:
+    """批量工人：选中单已在点击瞬间置「排队中」，这里并行开跑。
+
+    并发度 BATCH_CONCURRENCY（默认 3）——并行让整批更快跑完；
+    进度记账在 _BATCHES：前端轮询 /app/batch/{batch_id} 拿真实账本，
+    杜绝「前端说完毕、后台还在跑」的体验裂隙。
+    """
+    import os
+    from concurrent.futures import ThreadPoolExecutor
 
     from app.db import SessionLocal
-    from app.services.state_machine import block_task, recover_interrupted
+    from app.services.state_machine import recover_interrupted
 
     s0 = SessionLocal()
     try:
@@ -192,42 +237,10 @@ def _run_batch(batch_id: str, ids: list[int]) -> None:
     finally:
         s0.close()
 
-    for tid in ids:
-        s = SessionLocal()
-        task = None
-        try:
-            task = s.query(ApprovalTask).filter_by(id=tid).one_or_none()
-            if task is None:
-                continue
-            from app.services import engine as engine_module
-
-            if not engine_module.try_acquire(tid):   # 该单已在别处运行
-                with _BATCH_LOCK:
-                    _BATCHES[batch_id]["skipped"] += 1
-                continue
-            try:
-                if task.task_status == "blocked":
-                    # blocked 单进批次 = 重试语义：复位后再跑（缺附件由 retry_task 拒绝）
-                    from app.services.state_machine import retry_task
-
-                    retry_task(s, task)
-                from app.services.engine import run_full_cycle
-                from app.services.run_trace import record_tool_trace
-
-                result = run_full_cycle(s, task)
-                record_tool_trace(s, task, result.get("trace"))
-            finally:
-                engine_module.release(tid)
-            with _BATCH_LOCK:
-                _BATCHES[batch_id]["done"] += 1
-        except Exception as exc:  # noqa: BLE001 —— 吞异常可以，吞状态不行
-            if task is not None:
-                s.rollback()   # 损坏事务先复位，否则 block_task 自身会炸
-                block_task(s, task, "LLM_RUN_FAILED",
-                           f"批量运行失败已安全停机：{exc}"[:300])
-            continue
-        finally:
-            s.close()
+    workers = max(1, int(os.environ.get("BATCH_CONCURRENCY", "3")))
+    with ThreadPoolExecutor(max_workers=workers,
+                            thread_name_prefix="cra-batch") as pool:
+        list(pool.map(lambda tid: _run_one(batch_id, tid), ids))
 
 
 _BATCH_LOCK = threading.Lock()
@@ -243,12 +256,23 @@ def batch_review(payload: dict,
         from fastapi import HTTPException
 
         raise HTTPException(422, "task_ids 为空")
+    # 点击瞬间即排队：选中的待处理单/已完成单同步置「排队中」——
+    # done 单进批次若不排队，工具链的 advance_to 从 done 全是空转，
+    # 重审真实在跑状态却钉死「已完成」（用户实测缺陷）——必须先迁移才有可见流转
+    from app.services.state_machine import transition
+
+    queued = 0
+    for tid in ids:
+        task = db.query(ApprovalTask).filter_by(id=tid).one_or_none()
+        if task is not None and task.task_status in ("pending", "done") \
+                and transition(db, task, "queued"):
+            queued += 1
     batch_id = uuid.uuid4().hex[:12]
     with _BATCH_LOCK:
         _BATCHES[batch_id] = {"total": len(ids), "done": 0, "skipped": 0}
     background_tasks.add_task(_run_batch, batch_id, ids)
-    return {"batch_id": batch_id, "accepted": len(ids),
-            "note": "后台逐张处理中（每张约 30~60 秒），轮询 /app/batch/{batch_id}"}
+    return {"batch_id": batch_id, "accepted": len(ids), "queued": queued,
+            "note": "已全部标记排队中，后台并行审查；轮询 /app/batch/{batch_id}"}
 
 
 @router.get("/batch/{batch_id}")

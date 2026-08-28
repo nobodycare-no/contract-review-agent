@@ -20,6 +20,7 @@
       <select v-model="filter">
         <option value="">全部状态</option>
         <option value="pending">待处理</option>
+        <option value="queued">排队中</option>
         <option value="blocked">需人工处理</option>
         <option value="done">已完成</option>
       </select>
@@ -52,7 +53,7 @@
 import { onMounted, ref, computed } from 'vue'
 import { api } from '../api'
 
-const STATUS={pending:'待处理',parsing:'AI 审查中',reviewing:'AI 审查中',blocked:'需人工处理',done:'已完成'}
+const STATUS={pending:'待处理',queued:'排队中',parsing:'AI 审查中',reviewing:'AI 审查中',blocked:'需人工处理',done:'已完成'}
 const WRITE ={not_written:'尚未生成',writing:'写入中…',success:'已写入评论区',failed:'写入失败'}
 const LEVEL ={high:'高风险',medium:'中风险',low:'低风险',高:'高风险',中:'中风险',低:'低风险'}
 const RISK_CLS={high:'high',medium:'medium',low:'low',高:'high',中:'medium',低:'low'}
@@ -91,11 +92,11 @@ const BKEY='cra_active_batch'
 
 function watchBatch(bid){
   running.value=true
-  msg.value='后台批次处理中：GPU 逐张处理（每张约 30~60 秒）。本页刷新不丢失跟踪。'
+  msg.value='后台批次处理中：已排队合同由工人并行审查（每张约 30~60 秒）。本页刷新不丢失跟踪。'
   const safety=setTimeout(()=>{
     if(running.value){running.value=false; localStorage.removeItem(BKEY)
       msg.value='批次等待超时——请以列表状态与留痕为准'}
-  },900000)
+  },2400000)
   const timer=setInterval(async()=>{
     loadQueue()
     const st=await api.batchStatus(bid).catch(()=>null)
@@ -110,12 +111,13 @@ function watchBatch(bid){
 
 async function batchStart(){
   running.value=true
-  msg.value='已提交后台队列：GPU 逐张处理（每张约 30~60 秒）。本页刷新不丢失跟踪。'
+  msg.value='已受理：选中合同全部标记「排队中」，后台并行审查。本页刷新不丢失跟踪。'
   const r=await api.batchReview(selectedIds.value)
   if(!r.batch_id){running.value=false; msg.value=r.detail||'提交失败'; return}
   localStorage.setItem(BKEY, JSON.stringify({bid:r.batch_id, ts:Date.now()}))
   selectedIds.value=[]
   watchBatch(r.batch_id)
+  loadQueue()   // 立刻拉一次列表——排队徽标马上可见，不等 3s 轮询
 }
 
 const busyId=ref(null)
