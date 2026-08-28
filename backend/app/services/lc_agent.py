@@ -10,7 +10,6 @@ LangChain 官方 Agent（底层 LangGraph 引擎）：
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 
@@ -72,20 +71,10 @@ def _lc_tools(ctx):
 
 
 def _run_tool(ctx, name: str, args: dict) -> str:
-    """统一包络执行一个工具；业务错误原样回传，让模型看到并自纠。"""
+    """统一包络执行一个工具；trace 由 execute_tool 包络层统一记账（单一事实源）。"""
     from app.tools_registry import execute_tool
 
-    out = execute_tool(ctx, name, args or {})
-    outcome = "ok"
-    try:
-        data = json.loads(out[:4000])
-        err = data.get("error")
-        if err:   # 不吞不抬：原文回传模型，trace 如实记错误码
-            outcome = str(err.get("code") or "ERR")
-    except json.JSONDecodeError:
-        pass
-    ctx.trace.append({"tool": name, "outcome": outcome})
-    return out[:2000]
+    return execute_tool(ctx, name, args or {})[:2000]
 
 
 def _final_text(messages: list) -> str:
