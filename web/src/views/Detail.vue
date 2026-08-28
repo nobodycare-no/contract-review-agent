@@ -108,10 +108,16 @@ const blockGuide=computed(()=>{
   for(const [re,tip] of GUIDE) if(re.test(r)) return tip
   return '请依据上方原因处理；多数情况点「重新处理此单」让 AI 完整重跑即可。'
 })
+let poll=null
+function startPoll(){ if(!poll) poll=setInterval(load,4000) }   // 重审期间状态实时刷新
+function stopPoll(){ if(poll){clearInterval(poll);poll=null} }
+
 async function doRetry(){
   rerunning.value=true
-  retryHint.value='正在复位并重跑（真机推理约需 30~60 秒），完成后自动刷新…'
+  retryHint.value='正在复位并重跑（真机推理约需 30~60 秒），状态实时刷新中…'
+  startPoll()
   const r=await api.retry(route.params.id).catch(e=>({detail:e.message}))
+  stopPoll()
   rerunning.value=false
   if(r&&r.status==='succeeded'){retryHint.value='';load()}
   else{retryHint.value=(r&&r.detail)||'无法重试——请先补传附件'}
@@ -120,8 +126,10 @@ async function doRetry(){
 const rerunning=ref(false), rerunHint=ref('')
 async function doRerun(){
   rerunning.value=true
-  rerunHint.value='AI 正在重新审查（真机推理约需 30~60 秒），完成后自动刷新…'
+  rerunHint.value='AI 正在重新审查（真机推理约需 30~60 秒），状态实时刷新中…'
+  startPoll()
   const r=await api.runAgent({task_id:d.value.task.id, dry_run:false}).catch(e=>({detail:e.message}))
+  stopPoll()
   rerunning.value=false
   if(r&&r.status==='succeeded'){
     rerunHint.value='重审完成，服务端耗时 '+((r.elapsed_ms||0)/1000).toFixed(1)+'s'
