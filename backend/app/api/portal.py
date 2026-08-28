@@ -214,6 +214,9 @@ def _run_one(batch_id: str, tid: int) -> None:
             s.rollback()   # 损坏事务先复位，否则 block_task 自身会炸
             block_task(s, task, "LLM_RUN_FAILED",
                        f"批量运行失败已安全停机：{exc}"[:300])
+        with _BATCH_LOCK:
+            _BATCHES[batch_id]["failed"] += 1   # 失败必须计数：否则 done+skipped<total
+                                                # 永不满足完成条件，前端按钮锁死（真机教训）
     finally:
         s.close()
 
@@ -269,7 +272,8 @@ def batch_review(payload: dict,
             queued += 1
     batch_id = uuid.uuid4().hex[:12]
     with _BATCH_LOCK:
-        _BATCHES[batch_id] = {"total": len(ids), "done": 0, "skipped": 0}
+        _BATCHES[batch_id] = {"total": len(ids), "done": 0, "skipped": 0,
+                              "failed": 0}
     background_tasks.add_task(_run_batch, batch_id, ids)
     return {"batch_id": batch_id, "accepted": len(ids), "queued": queued,
             "note": "已全部标记排队中，后台并行审查；轮询 /app/batch/{batch_id}"}
