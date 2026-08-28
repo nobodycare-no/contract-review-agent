@@ -10,10 +10,13 @@ class Settings(BaseSettings):
     app_env: str = "dev"
     mysql_url: str = "mysql+pymysql://cra:cra123456@mysql:3306/contract_review?charset=utf8mb4"
 
-    # LLM（Qwen3-8B @ vLLM，AutoDL 6006 端口映射）
+    # LLM（云端 BigModel OpenAI 兼容端点 · zai-custom · GLM；
+    # 本地 GPU vLLM 为备选路径，启动卡见 deploy/GPU_VLLM_START.md）
     llm_base_url: str = ""
-    llm_api_key: str = "sk-atguigu"
-    llm_model: str = "qwen3-8b"
+    llm_api_key: str = ""            # 密钥不进代码：缺失时 API 401 显式失败
+    llm_model: str = "glm-5.3-flash"
+    llm_thinking: str = ""           # 空=不干预；glm-5.3-flash 档位 low/high/max
+                                     # （真机证据：该模型不支持关闭思考，disabled 会 400）
     llm_timeout_s: int = 120
     mock_timeout_s: int = 15         # 单轮基准超时；llm_client 以 ×8 作为 AI 审查墙钟
 

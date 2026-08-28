@@ -2,7 +2,7 @@
 
 LangChain 官方 Agent（底层 LangGraph 引擎）：
 - 工具调度完全交给 langchain.agents.create_agent
-  （ChatOpenAI 走 vLLM OpenAI 兼容原生 tools）；
+  （ChatOpenAI 走 OpenAI 兼容原生 tools：云端 BigModel GLM，本地 vLLM 备选）；
 - **不存在确定性兜底/JSON降级**——LLM 不可用就是异常上抛，任务如实失败；
   GPU 使用与否从此不可被静默绕过。
 - 步数预算由 recursion_limit 承担；工具业务错误原样回传给模型自纠，
@@ -41,8 +41,8 @@ SYSTEM_PROMPT = (
     "【意见要求】最终审查意见完全由你撰写：引用条款原文佐证，指出风险并给出可执行建议。"
     "评论文本第一行必须是『总风险等级：高|中|低』，全程中文。"
     "无论前面发生什么，最后一步必须调用 write_approval_comment 完成写回——未写回即任务失败。\n"
-    "【模型自觉】你是 8B 级本地模型：上下文有限，不要试图一次读完整份合同，"
-    "善用检索工具定位关键条款；不确定就如实说明，禁止编造条款原文。"
+    "【模型自觉】引用的条款必须来自合同原文——不确定就如实说明，禁止编造条款原文；"
+    "长合同善用 search_contract_text 定位关键条款，不要凭记忆复述。"
 )
 
 
@@ -50,8 +50,8 @@ def _chat_model():
     from langchain_openai import ChatOpenAI
 
     return ChatOpenAI(
-        model=os.environ.get("LLM_MODEL", "qwen3-8b"),
-        api_key=os.environ.get("LLM_API_KEY", "sk-atguigu"),
+        model=os.environ.get("LLM_MODEL", "glm-5.3-flash"),
+        api_key=os.environ.get("LLM_API_KEY", ""),
         base_url=os.environ["LLM_BASE_URL"].rstrip("/"),
         temperature=0.2,
         max_retries=2,      # 同端点重试≠兜底：重试耗尽照样异常上抛
@@ -134,7 +134,7 @@ def _run_tool(ctx, name: str, args: dict) -> str:
 
 
 def _final_text(messages: list) -> str:
-    """取最后一条有内容的消息，剥掉 Qwen3 思考块。"""
+    """取最后一条有内容的消息，剥掉个别模型内联输出的思考块。"""
     for msg in reversed(messages):
         content = getattr(msg, "content", None)
         if isinstance(content, list):

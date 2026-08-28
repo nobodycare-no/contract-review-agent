@@ -1,6 +1,7 @@
 """LLM 传输层：真实 HTTP / 轨迹回放 双实现 + 能力探测（ADR-B7/B9）。
 
-- RealHTTPTransport: httpx 直连 vLLM /v1/chat/completions（OpenAI 兼容）
+- RealHTTPTransport: httpx 直连 OpenAI 兼容 /chat/completions
+  （云端 BigModel GLM 与本地 vLLM 走同一协议；Qwen /no_think 注入已随本地专属通道移除）
 - ReplayTransport:   按 fixtures jsonl 顺序吐响应——CI 无 GPU 回放录制轨迹
 - probe_native_tools(): 最小 tools 请求探测服务端 tool-call-parser 能力，进程内缓存
 """
@@ -27,17 +28,16 @@ class RealHTTPTransport:
     def chat(self, messages: list[dict], tools: list[dict] | None = None,
              *, channel: str = "native") -> dict:
         settings = get_settings()
-        # 兼容性最强关闭思考的方式：/no_think 用户消息软开关（官方语义，
-        # 与服务端版本无关）；顶层 chat_template_kwargs 曾被部分版本忽略
-        messages = [dict(m) for m in messages]
-        for m in reversed(messages):
-            if m.get("role") == "user":
-                m["content"] = (m.get("content") or "") + "\n/no_think"
-                break
+        messages = [dict(m) for m in messages]  # 不做任何模型专属提示词注入
         payload: dict[str, Any] = {
             "model": settings.llm_model, "messages": messages,
-            "temperature": 0.2, "max_tokens": 1500,
+            "temperature": 0.2,
+            # 思考型云端模型的推理 token 计入完成预算——余量给足，JSON 不许被截断
+            "max_tokens": 3000,
         }
+        if settings.llm_thinking:
+            # 显式思考开关（BigModel thinking 参数）；空=不干预模型缺省行为
+            payload["thinking"] = {"type": settings.llm_thinking}
         if tools and channel == "native":
             payload["tools"] = tools
         try:

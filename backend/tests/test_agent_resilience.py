@@ -12,7 +12,7 @@ import pytest
 import app.services.lc_agent as lc_module
 
 
-def _break_llm(monkeypatch, message="vLLM 连接失败(ECONNREFUSED)"):
+def _break_llm(monkeypatch, message="LLM 连接失败(ECONNREFUSED)"):
     def boom(db, task, *, dry_run=False):
         raise RuntimeError(message)
 

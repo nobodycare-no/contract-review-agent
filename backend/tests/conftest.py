@@ -10,6 +10,8 @@ from collections.abc import Iterator
 _tmpdir = tempfile.mkdtemp(prefix="cra-test-")
 os.environ.setdefault("MYSQL_URL", f"sqlite:///{_tmpdir}/cra_test.sqlite3")
 os.environ.setdefault("LLM_BASE_URL", "")          # 未配置 LLM → health 报 not_configured
+os.environ.setdefault("LLM_API_KEY", "test-key")   # 单测占位凭据：模型一律被桩替换，不出网；
+                                                   # 生产环境无密钥时 ChatOpenAI 构造即显式报错
 os.environ.setdefault("ADMIN_TOKEN", "test-admin")
 os.environ.setdefault("UPLOAD_DIR", os.path.join(_tmpdir, "attachments"))
 os.environ.setdefault("AGENT_ENGINE", "legacy")   # 单测默认 legacy；LC 真机路径见联调脚本

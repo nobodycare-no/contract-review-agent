@@ -143,22 +143,25 @@ def view_file(task_id: int, attachment_id: str,
 
 @router.get("/diag_llm")
 def diag_llm() -> dict:
-    """发一次最小真实推理请求并原样回报：给用户看得懂的 GPU 链路证据。"""
-    import os
+    """发一次最小真实推理请求并原样回报：给用户看得懂的 LLM 链路证据。"""
     import httpx
 
-    base = os.environ.get("LLM_BASE_URL", "")
-    key = os.environ.get("LLM_API_KEY", "")
-    out = {"configured": bool(base), "url": base}
+    from app.core.config import get_settings
+
+    s = get_settings()
+    base, key, model = s.llm_base_url, s.llm_api_key, s.llm_model
+    out = {"configured": bool(base), "url": base, "model": model}
     if not base:
         return {**out, "reachable": False, "note": "未配置 LLM_BASE_URL"}
     try:
         r = httpx.post(f"{base.rstrip('/')}/chat/completions",
                        headers={"Authorization": f"Bearer {key}"},
-                       json={"model": os.environ.get("LLM_MODEL", "qwen3-8b"),
+                       json={"model": model,
                              "messages": [{"role": "user",
                                            "content": "只回复两个字：在线"}],
-                             "max_tokens": 8, "temperature": 0},
+                             # 思考型模型 reasoning token 计入 max_tokens——
+                             # 上限 8 只会回出空串（真机 glm-5.3-flash 证据）
+                             "max_tokens": 512, "temperature": 0},
                        timeout=30)
         out.update(status=r.status_code)
         try:
