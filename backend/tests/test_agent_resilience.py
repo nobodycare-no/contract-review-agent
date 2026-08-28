@@ -426,6 +426,71 @@ def test_run_lc_returns_real_elapsed_ms(db_session, monkeypatch):
     assert result["elapsed_ms"] >= 20
 
 
+def test_run_lc_repairs_recursion_exhaustion(db_session, monkeypatch):
+    """递归上限耗尽可能纠偏一次（新开精简线程+明确收尾指令），再失败才掀桌。"""
+    from langgraph.errors import GraphRecursionError
+
+    from tests.factory import make_form
+
+    task = make_form(db_session)
+    monkeypatch.setenv("AGENT_ENGINE", "langchain")
+    monkeypatch.setenv("LLM_BASE_URL", "http://127.0.0.1:9/v1")
+
+    def fake_create_agent(model, tools, system_prompt=None, **kw):
+        tmap = {t.name: t for t in tools}
+        state = {"n": 0}
+
+        class _FakeAgent:
+            def invoke(self, inp, config=None):
+                state["n"] += 1
+                if state["n"] == 1:
+                    raise GraphRecursionError("Recursion limit of 24 reached")
+                tmap["save_review_result"].invoke({
+                    "overall_risk_level": "中", "summary_text": "s",
+                    "focus_points_json": [], "comment_text": "AI 亲笔意见"})
+                tmap["write_approval_comment"].invoke({})
+                return {"messages": [*inp["messages"], {"content": "闭环完成"}]}
+
+        return _FakeAgent()
+
+    import langchain.agents as lc_agents
+    monkeypatch.setattr(lc_agents, "create_agent", fake_create_agent)
+
+    from app.services.lc_agent import run_lc
+
+    result = run_lc(db_session, task)
+
+    assert result["status"] == "succeeded"
+    assert any(t["tool"] == "write_approval_comment" for t in result["trace"])
+
+
+def test_tool_exception_trace_carries_cause(db_session, monkeypatch):
+    """EXC 轨迹必须携带原因——只记 EXC 两个字母等于让故障永远匿名。"""
+    import json as _json
+
+    from tests.factory import make_form
+
+    from app.services import reviewer
+    from app.tools_registry import RunContext, execute_tool
+
+    task = make_form(db_session)
+    db_session.add(__import__("app.models", fromlist=["ContractParse"]).ContractParse(
+        task_id=task.id, parse_status="done", raw_text="第一条 金额：100元"))
+    db_session.commit()
+    ctx = RunContext(db=db_session, task=task)
+
+    def boom(db, t):
+        raise RuntimeError("演示性爆炸：字段映射缺失")
+
+    monkeypatch.setattr(reviewer, "parse_task", boom)
+    out = execute_tool(ctx, "parse_contract_document", {})
+
+    assert _json.loads(out)["error_code"] == "TOOL_EXCEPTION"
+    exc_entry = [t for t in ctx.trace if t["tool"] == "parse_contract_document"][-1]
+    assert exc_entry["outcome"].startswith("EXC:"), exc_entry
+    assert "字段映射缺失" in exc_entry["outcome"]
+
+
 def test_save_review_result_rejects_silent_comment_fallback(db_session):
     from tests.factory import make_form
 

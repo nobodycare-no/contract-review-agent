@@ -1,31 +1,29 @@
 # 软件需求文档（SRD）— 合同审批审查 Agent
 
-> [!NOTE]
-> 本文描述 **main v1.x 基线**。分支 feat/langchain-react-gpu-only（V2：LangChain ReAct、十工具、零降级、重试即真跑引擎等）的行为差异以 [V2分支现状.md](../V2分支现状.md) 为准，冲突处以该文档为准。
-
 | 项 | 内容 |
 |----|------|
-| 版本 | v1.2（生产级 Harness 升级） |
+| 版本 | v2.0（LangChain ReAct 引擎 · 零降级） |
 | 需求基线 | 《大模型项目实战》§2.4 合同审批审查系统 |
 | 关联仓库 | github.com/nobodycare-no/contract-review-agent |
 
-> v1.1 变更：修复 FR-D 表格错乱；N05 扩展为含云端部署要求。
-> v1.2 变更：新增 FR-E5 运行预算、FR-G 生产化运行时需求组；N04 升级为结构化可观测体系。
+> v2.0 变更：引擎迁移至 LangChain 官方 Agent（LangGraph）；废除全部降级通道（零降级）；
+> 工具扩至十个；新增闭环闸门/纠偏轮/同单互斥/批量账本/诚实计时；AI 以原文修正解析初稿。
 
 ## 1. 项目概述
 
-面向企业合同审批场景的自动审查系统：Agent 通过 **Function-Calling 自主调用七个工具**（拉取待办 / 审批详情 / 附件下载 / 文档解析 / 规则审查 / 结果保存 / 评论回写），完成完整闭环；**不代替人工审批**，产出风险审查意见供法务审核人参考。
+面向企业合同审批场景的自动审查系统：**LangChain ReAct Agent 通过原生 function-calling 自主调度十个工具**（拉取待办 / 审批详情 / 附件下载 / 文档解析 / 基本信息 AI 修正 / 原文检索 / 规则清单 / 规则初筛 / 结果保存 / 评论回写），完成完整闭环；**不代替人工审批**，产出由 AI 亲笔撰写的风险审查意见供法务审核人参考。
 
-**与项目 A 的本质差异**：无 RAG / 无向量库 / 无检索——核心是 **工具调用 Agent + 规则引擎 + 状态机**。
+**与项目 A 的本质差异**：无 RAG / 无向量库——核心是 **Agent 运行时工程 + 规则引擎 + 状态机**。
+**产品铁律：零降级**。LLM 不可用或闭环未完成 → 任务显式 `blocked`（人话原因 + 轨迹尾巴），绝不伪造成功。
 
 ## 2. 用户角色（规范 §2.4.2）
 
 | 角色 | 定位 | 交互方式 |
 |------|------|---------|
-| 审批系统 | 外部系统（本项目以 mock 容器仿真） | REST：待办/详情/附件/评论接收 |
-| 法务审核人 | 查看审查结果、证据定位、关注点 | 简易 Web 工作台 |
-| 系统管理员 | 维护规则、查看日志、重试阻塞任务 | Admin API（Token 保护）+ CLI |
-| Agent（AI） | Function-calling 驱动七工具完成闭环 | 七大工具接口 |
+| 审批系统 | 本地审批域（V1 起为本系统自有业务表，mock 已物理删除） | approval_store 网关 |
+| 法务审核人 | 查看审查结果、证据定位、留痕时间线、原件查看 | Vue3 Web 工作台 :18000 |
+| 系统管理员 | 维护规则、查看日志、重试阻塞任务、重置演示数据 | Admin API（Token 保护） |
+| Agent（AI） | 原生 function-calling 自主调度十工具完成闭环 | 十工具接口 |
 
 ## 3. 功能需求（FR-CRA-xx）
 
@@ -41,80 +39,83 @@
 | 编号 | 需求 | 优先级 |
 |------|------|--------|
 | B1 | 四格式解析：docx/pdf/md·txt/png·jpg(OCR) | P0 |
-| B2 | 基本信息 8 字段提取（标题/编号/甲乙方/金额/币种/生效/到期），含 value+pos+status | P0 |
-| B3 | 八类条款定位（付款/交付/验收/违约/保密/数据/知识产权/争议），含片段+位置+present/absent | P0 |
-| B4 | LLM 增强提取（结构化 JSON）；失败回落正则结果 | P1 |
-| B5 | 解析失败必须记录原因，禁止空结果 | P0 |
+| B2 | 基本信息 8 字段提取初稿（正则），含 value+pos+status | P0 |
+| B3 | 八类条款定位（付款/交付/验收/违约/保密/数据/知识产权/争议） | P0 |
+| B4 | **AI 修正**：模型用 search_contract_text 拉原文核对初稿，错漏经 submit_basic_info 修正（status=ai_verified）——解析器只是初稿 | P0 |
+| B5 | 解析失败必须记录原因，禁止空结果；工具异常轨迹必须携带原因 | P0 |
 
 ### FR-C 规则审查
 | 编号 | 需求 | 优先级 |
 |------|------|--------|
-| C1 | 规则库 ≥11 类：预付款比例/付款周期/自动续约/违约责任缺失/管辖地/主体缺失/金额缺失/保密缺失/数据处理/知识产权缺失/验收标准缺失 | P0 |
-| C2 | 三种 match_mode：keyword / regex / absence（缺失探测） | P0 |
+| C1 | 规则库 ≥11 类（预付款/付款周期/自动续约/违约/管辖地/主体/金额/保密/数据/知产/验收） | P0 |
+| C2 | 三种 match_mode：keyword / regex / absence | P0 |
 | C3 | 命中输出：规则名/风险等级/命中证据原文/位置/建议说明 | P0 |
-| C4 | 总风险等级 = 命中规则最高级聚合；审批关注点列表 | P0 |
-| C5 | 规则可启停/编辑（管理员） | P1 |
-| C6 | LLM 自由裁量层（ADR-B10）：规则审查后对全文做语义级增量风险分析，每条输出必须引用原文证据，来源标记 AI_DISCRETIONARY 与规则命中区分；总评等级只升不降；LLM 不可用时静默降级为纯规则结果 | P1 |
+| C4 | 规则结果仅作参考线索；总风险等级由模型综合原文独立给出 | P0 |
+| C5 | 规则可启停/编辑（管理员）；模型亦可经 list_review_rules 自主查阅 | P1 |
+| C6 | AI 裁量增量层：语义级增量风险，强制原文证据；该层失败留痕不阻断 | P1 |
 
 ### FR-D 输出与回写
 | 编号 | 需求 | 优先级 |
 |------|------|--------|
-| D1 | 结果保存：总风险等级+摘要+关注点 JSON+评论全文 | P0 |
-| D2 | 评论生成：结构化模板 + LLM 摘要润色（降级时纯模板） | P0 |
-| D3 | 跨服务 HTTP 回写至 mock 审批评论区 | P0 |
+| D1 | 结果保存：总风险等级（枚举归一 高/中/低→high/medium/low）+摘要+关注点+评论全文 | P0 |
+| D2 | **评论完全由模型亲笔撰写**；comment_text 缺失即 VALIDATION_ERROR，禁止模板兜底 | P0 |
+| D3 | 回写至本地审批域评论区（幂等守卫：success 短路时仍闭环任务状态） | P0 |
 | D4 | 回写状态机 not_written→writing→success/failed | P0 |
 | D5 | 回写日志落库 comment_logs | P0 |
-| D6 | blocked 触发面：附件缺失 / 图片无法识别 / 文档内容为空 / 接口调用失败，四类统一进入 blocked 并记录原因；retry 按 block_stage 回溯 parsing 或 reviewing | P0 |
+| D6 | blocked 触发面：附件缺失/解析为空/运行失败（含 LLM 不可用、递归耗尽、闭环未完成），原因人话+处理指引；retry 即真跑引擎 | P0 |
 
-### FR-E Agent 循环
+### FR-E Agent 循环（LangChain ReAct）
 | 编号 | 需求 | 优先级 |
 |------|------|--------|
-| E1 | Function-calling 循环驱动七工具，步数上限 12 | P0 |
-| E2 | 七工具 JSON Schema 暴露给模型（规范 §2.4.10 签名逐一对应） | P0 |
-| E3 | 步数耗尽或模型未回写时**强制兜底执行回写工具** | P0 |
-| E4 | 全链路日志（fetch/download/parse/rule/write/agent 六类） | P0 |
-| E5 | 运行预算三维化：步数 × token 上限 × 墙钟时限，任一触顶进入优雅终结（强制 save+write），任务终态必为 done 或 blocked | P0 |
+| E1 | LangChain create_agent（LangGraph）驱动十工具，原生 function-calling，**工具选择与顺序由模型逐轮决策**（提示词给推荐路径而非铁律） | P0 |
+| E2 | 工具 schema 从 TOOLS_SCHEMA 动态生成强类型 args（只声明 dispatch 真实消费的参数） | P0 |
+| E3 | **闭环闸门**：图跑完≠闭环——未写回评论（dry-run 未保存）即 RuntimeError；漏写回但已保存时自动纠偏一轮；递归上限耗尽可能纠偏一次 | P0 |
+| E4 | 全链路留痕：工具调用（含 EXC 原因）/状态迁移/写回动作落 task_logs，详情页时间线呈现 | P0 |
+| E5 | 步数预算 recursion_limit（agent_max_steps×2）；响应携带 elapsed_ms 真实墙钟 | P0 |
 
 ### FR-F 管理与可用性
 | 编号 | 需求 | 优先级 |
 |------|------|--------|
-| F1 | blocked 任务人工重试（回到 parsing/reviewing） | P0 |
-| F2 | 规则启停/编辑 API（Admin Token 保护） | P1 |
-| F3 | 运行日志查询 API（按 task） | P1 |
-| F4 | mock 数据重置端点（演示复现） | P1 |
-| F5 | 简易 Web 工作台：待审列表/详情/命中/回写状态/运行轨迹 | P1 |
+| F1 | blocked/done 单重试 = 复位后真跑引擎；重试崩溃显式落回 blocked | P0 |
+| F2 | 规则启停/编辑 API（Admin Token） | P1 |
+| F3 | 运行留痕查询 API（按 task） | P1 |
+| F4 | reset-demo 演示数据重置端点 | P1 |
+| F5 | Vue3 Web 工作台：列表/详情（原件查看·AI核对信息·留痕时间线·再次审查）/批量队列 | P0 |
+| F6 | 批量送审 batch_id 进度账本（done/skipped），忙单跳过计数 | P0 |
+| F7 | 同单互斥：并发双跑 409 人话拒绝 | P0 |
 
-### FR-G 生产化运行时（v1.2 新增，简历核心差异化）
+### FR-G 运行时（V2 形态）
 | 编号 | 需求 | 优先级 |
 |------|------|--------|
-| G1 | 断点恢复：每步持久化消息快照至 agent_runs；进程崩溃后 POST /agent/runs/{id}/resume 从断点继续 | P0 |
-| G2 | dry-run 模式：全链路真实执行但跳过评论外呼，用于安全演练 | P0 |
-| G3 | 熔断器：LLM 连续失败 ≥3 次开路 60s，开路期直接走确定性通道并记录降级事件 | P0 |
-| G4 | 指标面：GET /metrics 以 Prometheus 文本格式暴露 runs/llm_calls/tool_calls/fallback/blocked/latency 计数 | P1 |
-| G5 | 提示词版本注册表：prompts.yaml 版本化，prompt_version/model/channel 写入运行记录，结果可复现 | P1 |
-| G6 | 轨迹录制回放：GPU 会话录制为 fixtures，测试以 FakeTransport 回放——CI 无 GPU | P1 |
-| G7 | 输出护栏与幂等守卫：回写文本长度上限/格式校验/控制符净化；write_status=success 拒绝重复外呼 | P0 |
+| G1 | dry-run：全链路真实执行、跳过评论外呼（闸门降级为校验已保存） | P0 |
+| G2 | 指标面 /metrics（Prometheus）+ 组件级 /health | P1 |
+| G3 | 输出护栏与幂等守卫（write_status=success 拒绝重复外呼，去重时仍闭环状态） | P0 |
+| G4 | 时区：容器 TZ=Asia/Shanghai，新落库时间为中国时间 | P1 |
+| G5 | 启动/批量自愈：孤儿任务显式 blocked，原因只陈述可观察事实 | P0 |
+
+> v1.x 的断点恢复(agent_runs)/熔断器/双通道 JSON 协议/轨迹录制回放随降级哲学一并废除；
+> RunController 代码保留于 agent_loop.py 仅供 legacy 开关对比，非交付面。
 
 ## 4. 非功能需求（NFR）
 
 | 编号 | 类别 | 要求 |
 |------|------|------|
-| N01 | 性能 | 单合同全闭环 ≤60s（GPU 在线，OCR 页除外） |
-| N02 | 可靠性 | LLM 不可用时降级为纯规则引擎模板意见，闭环不中断 |
-| N03 | 安全 | 管理面 Admin Token；附件路径穿越防护；mock 与工具面端口隔离 |
-| N04 | 可观测 | 结构化 JSON 日志（run_id/task_id 全链关联）+ task_logs 六类分级 + GET /metrics(Prometheus) + 组件级 /health(mysql/mock/llm) |
-| N05 | 可部署 | 双容器 compose 一键起；MySQL 数据卷持久化；**云端部署**：独立新购云服务器，prod override（restart 策略/收敛端口/持久卷），部署手册 docs/部署手册.md |
-| N06 | 测试 | pytest 覆盖去重/规则矩阵/状态机/mock 全链路（LLM mock） |
-| N07 | 环境隔离 | 与项目 A 完全独立：独立仓库/独立 compose 项目名/独立网络与数据卷；GPU 推理复用 AutoDL 但仅按需开机 |
+| N01 | 性能 | 单合同全闭环 30~90s（GPU 在线；重审同合同经前缀缓存显著加速） |
+| N02 | 可靠性 | **零降级**：LLM 不可用/闭环未完成 → blocked（人话原因），绝不产出伪造成功 |
+| N03 | 安全 | Admin Token；附件路径防护；同单互斥防双跑 |
+| N04 | 可观测 | 结构化 JSON 日志 + task_logs 工具留痕 + /metrics + /health + elapsed_ms |
+| N05 | 可部署 | 双容器 compose（mysql/app）；TZ=Asia/Shanghai；GPU 卡 deploy/GPU_VLLM_START.md |
+| N06 | 测试 | pytest 88+ 用例（含 LC_LIVE=1 门控真机用例）；V2 探针 11 项 |
+| N07 | 环境隔离 | 独立仓库/网络/数据卷；GPU 按需开机 |
 
-## 5. 验收标准（规范 §2.4.12 七条逐条映射）
+## 5. 验收标准（规范 §2.4.12 七条映射）
 
 | AC | 规范原文 | 验证方式 |
 |----|---------|---------|
-| AC-1 | 工具服务拉取待办并去重 | 探针：两次拉取任务数不变 + pytest |
-| AC-2 | 下载附件并保存记录 | 探针：attachment 表 download_status=done 且文件存在 |
-| AC-3 | 解析文档和图片扫描件提取字段 | docx 结构化断言 + png OCR 冒烟 |
-| AC-4 | 规则审查返回命中证据和风险等级 | 高风险合同 → 预付款/违约缺失等命中断言 |
-| AC-5 | 保存结果并回写评论区 | review_results 落库 + mock comments 收到 POST |
-| AC-6 | 异常进入阻塞并支持重试 | 缺附件单 → blocked → retry → done |
-| AC-7 | 完整闭环演示 | demo 脚本五阶段彩色输出全程取证 |
+| AC-1 | 拉取待办并去重 | V2 探针：重种5单+两次拉取视图一致 |
+| AC-2 | 下载附件并保存记录 | download_status=done + 留痕 |
+| AC-3 | 解析文档与扫描件 | 金额归一化断言 + OCR 编号命中 |
+| AC-4 | 规则审查证据与等级 | 高风险合同 7 命中 overall=high |
+| AC-5 | 保存并回写评论区 | success + 幂等 deduped + 中文枚举归一 |
+| AC-6 | 异常阻塞并支持重试 | 空单拒绝 + blocked 重试即真跑 |
+| AC-7 | 完整闭环演示 | V2 探针 AGENT-RUN（elapsed_ms/trace 取证）+ LC_LIVE 真机用例 |
