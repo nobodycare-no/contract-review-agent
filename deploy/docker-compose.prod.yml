@@ -1,18 +1,11 @@
+# 生产 override（V2 双容器：mysql + app；mock 容器已随统一系统废除）
+# 用法：docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 services:
   app:
     restart: unless-stopped
-    ports: !override
-      - "18000:8000"          # 对外唯一入口
-    volumes:
-      - attachment_data:/srv/storage/attachments
 
   mysql:
     restart: unless-stopped
-    ports: !override []       # 生产不暴露宿主端口
-
-  mock-approval:
-    restart: unless-stopped
-    ports: !override []       # 移除 18100 回环调试口，仅 cranet 内网可达
 
 volumes:
   attachment_data:
