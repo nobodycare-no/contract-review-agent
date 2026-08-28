@@ -11,7 +11,8 @@ from app.services.tool_errors import ToolError, to_blocked_stage
 logger = get_logger("state_machine")
 
 ALLOWED: dict[str, set[str]] = {
-    "pending": {"parsing", "blocked"},
+    "pending": {"parsing", "blocked", "queued"},
+    "queued": {"parsing", "pending"},      # 排队中：工人开跑→parsing；重启自愈→pending（从未开跑）
     "parsing": {"reviewing", "blocked"},
     "reviewing": {"done", "blocked"},
     "blocked": {"parsing", "reviewing"},   # retry 回溯
@@ -85,17 +86,28 @@ def retry_task(db: Session, task: ApprovalTask) -> str:
     return stage
 
 
-def recover_interrupted(db: Session) -> int:
+def recover_interrupted(db: Session, *, heal_queued: bool = False) -> int:
     """启动自愈：卡在 parsing/reviewing 且无在途工人的任务 → blocked。
 
     原因标注只陈述可观察事实（上次运行未完成），不虚构具体成因——
     无论是进程重启打断还是模型自弃闭环，落到用户面前都是同一句实话。
+
+    heal_queued=True（仅进程启动时）：从未开跑的排队单诚实回 pending——
+    它们根本没被工人碰过，不该装作「运行未完成」吓用户。
+    批量工人启动前的清理不传该参，避免把刚排队的单洗回待处理。
     """
     from app.models import AgentRun
 
     running_ids = {r.task_id for r in db.query(AgentRun)
                    .filter_by(status="running").all()}
     fixed = 0
+    if heal_queued:
+        for t in (db.query(ApprovalTask)
+                  .filter(ApprovalTask.task_status == "queued").all()):
+            if transition(db, t, "pending"):
+                fixed += 1
+                db.add(TaskLog(task_id=t.id, log_level="info", log_type="agent",
+                               log_content="startup recovery: queued -> pending（未开跑）"))
     for t in (db.query(ApprovalTask)
               .filter(ApprovalTask.task_status.in_(["parsing", "reviewing"]))
               .all()):
